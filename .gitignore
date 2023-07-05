@@ -2,6 +2,9 @@
 data/
 *.parquet
 
+# Splink charts
+splink_temp/
+
 # Jupyter Notebook
 .ipynb_checkpoints
 
