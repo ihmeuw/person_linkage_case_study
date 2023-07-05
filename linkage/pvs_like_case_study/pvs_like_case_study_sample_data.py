@@ -5,16 +5,10 @@
 # Edit with care -- substantive edits should go in the notebook,
 # or they will be overwritten the next time this script is generated.
 
-
-
-
 import re, copy
 import pandas as pd, numpy as np
 import jellyfish
     
-
-
-
 # It's not easy to programmatically display direct dependencies separate from transitive
 # dependencies.
 # This environment was created by:
@@ -23,25 +17,13 @@ import jellyfish
 # $ pip install pandas numpy matplotlib pseudopeople splink jupyterlab jellyfish
 # ! conda env export | grep -v 'prefix:' | tee conda_environment.yaml
     
-
-
-
-
 census_2030 = pd.read_parquet('generate_simulated_data/output/census_2030_sample.parquet')
 geobase_reference_file = pd.read_parquet('generate_simulated_data/output/geobase_reference_file_sample.parquet')
 name_dob_reference_file = pd.read_parquet('generate_simulated_data/output/name_dob_reference_file_sample.parquet')
     
-
-
-
-
 # Input file before any processing; the final result will be this with the PIK column added
 census_2030_raw_input = census_2030.copy()
     
-
-
-
-
 # Nickname processing
 # Have not yet found a nickname list in PVS docs,
 # so we do a minimal version for now -- could use
@@ -75,9 +57,6 @@ census_2030 = add_unique_record_id(
     "census_2030_preprocessed",
 )
     
-
-
-
 # This list of fake names comes from the NORC report, p. 100-101
 # It is what was used in PVS as of 2011
 with open('fake-names.txt') as f:
@@ -86,9 +65,6 @@ with open('fake-names.txt') as f:
 assert (fake_names == fake_names.str.upper()).all()
 fake_names
     
-
-
-
 for col in ["first_name", "last_name"]:
     has_fake_name = census_2030[col].str.upper().isin(fake_names)
     print(f'Found {has_fake_name.sum()} fake names in {col}')
@@ -98,10 +74,6 @@ for col in ["first_name", "last_name"]:
         census_2030[col]
     )
     
-
-
-
-
 def standardize_address_part(column):
     return (
         column
@@ -122,26 +94,14 @@ def standardize_address_part(column):
 address_cols = ['street_number', 'street_name', 'unit_number', 'city', 'state', 'zipcode']
 census_2030[address_cols] = census_2030[address_cols].apply(standardize_address_part)
     
-
-
-
-
-
 census_2030 = census_2030[
     census_2030.first_name.notnull() |
     census_2030.last_name.notnull()
 ]
     
-
-
-
-
 # We want to compare mailing address with physical address
 geobase_reference_file = geobase_reference_file.rename(columns=lambda c: c.replace('mailing_address_', ''))
     
-
-
-
 # PVS uses DOB as separate fields for day, month, and year
 def split_dob(df):
     df = df.copy()
@@ -156,9 +116,6 @@ census_2030 = split_dob(census_2030)
 geobase_reference_file = split_dob(geobase_reference_file)
 name_dob_reference_file = split_dob(name_dob_reference_file)
     
-
-
-
 # I don't fully understand the purpose of blocking on the geokey,
 # as opposed to just blocking on its constituent columns.
 # Maybe it is a way of dealing with missingness in those constituent
@@ -182,9 +139,6 @@ def add_geokey(df):
 geobase_reference_file = add_geokey(geobase_reference_file)
 census_2030 = add_geokey(census_2030)
     
-
-
-
 # Layne, Wagner, and Rothhaas p. 26: the name matching variables are
 # First 15 characters First Name, First 15 characters Middle Name, First 12 characters Last Name
 # Additionally, there are blocking columns for all of 1-3 initial characters of First/Last.
@@ -205,9 +159,6 @@ census_2030 = add_truncated_name_cols(census_2030)
 geobase_reference_file = add_truncated_name_cols(geobase_reference_file)
 name_dob_reference_file = add_truncated_name_cols(name_dob_reference_file)
     
-
-
-
 # Layne, Wagner, and Rothhaas p. 26: phonetics are used in blocking (not matching)
 # - Soundex for Street Name
 # - NYSIIS code for First Name
@@ -236,9 +187,6 @@ geobase_reference_file = add_address_phonetics(geobase_reference_file)
 
 name_dob_reference_file = add_name_phonetics(name_dob_reference_file)
     
-
-
-
 # Columns used to "cut the database": ZIP3 and a grouping of first and last initial
 def add_zip3(df):
     return df.assign(zip3=lambda x: x.zipcode.str[:3])
@@ -249,9 +197,6 @@ def add_first_last_initial_categories(df):
     initial_cut = lambda x: x.fillna('A').str[0].replace('A', 'A-or-blank').replace(['U', 'V', 'W', 'X', 'Y', 'Z'], 'U-Z')
     return df.assign(first_initial_cut=lambda x: initial_cut(x.first_name), last_initial_cut=lambda x: initial_cut(x.last_name))
     
-
-
-
 census_2030 = add_zip3(census_2030)
 census_2030 = add_first_last_initial_categories(census_2030)
 
@@ -259,28 +204,12 @@ geobase_reference_file = add_zip3(geobase_reference_file)
 
 name_dob_reference_file = add_first_last_initial_categories(name_dob_reference_file)
     
-
-
-
-
 census_2030
     
-
-
-
 geobase_reference_file
     
-
-
-
 name_dob_reference_file
     
-
-
-
-
-
-
 def probability_two_random_records_match(input_file, reference_file):
     # NOTE: We use census_2030_raw_input instead of input_file in the numerator.
     # This is the original CUF, with only unintentional duplicates.
@@ -292,16 +221,9 @@ def probability_two_random_records_match(input_file, reference_file):
 
 probability_two_random_records_match(census_2030, geobase_reference_file)
     
-
-
-
-
 common_cols = [c for c in census_2030.columns if c in geobase_reference_file.columns or c in name_dob_reference_file.columns]
 common_cols
     
-
-
-
 def prep_table_for_splink(df, dataset_name, columns):
     return (
         df[[c for c in df.columns if c in columns]]
@@ -313,15 +235,8 @@ tables_for_splink = [
     prep_table_for_splink(census_2030, "census_2030", common_cols)
 ]
     
-
-
-
 [len(t) for t in tables_for_splink]
     
-
-
-
-
 from splink.duckdb.linker import DuckDBLinker
 from splink.duckdb.comparison_library import (
     exact_match,
@@ -374,24 +289,13 @@ linker = DuckDBLinker(
     input_table_aliases=["reference_file", "census_2030"]
 )
     
-
-
-
-
 # %%time
 
 linker.estimate_u_using_random_sampling(max_pairs=1e7, seed=1234)
     
-
-
-
 # Ignore the green bars on the left, these are the m probabilities that haven't been estimated yet
 linker.m_u_parameters_chart()
     
-
-
-
-
 blocking_rule_for_training = "l.first_name_15 = r.first_name_15"
 em_session_1 = linker.estimate_parameters_using_expectation_maximisation(
     blocking_rule_for_training,
@@ -399,19 +303,10 @@ em_session_1 = linker.estimate_parameters_using_expectation_maximisation(
     fix_probability_two_random_records_match=True,
 )
     
-
-
-
 em_session_1.m_u_values_interactive_history_chart()
     
-
-
-
 em_session_1.match_weights_interactive_history_chart()
     
-
-
-
 blocking_rule_for_training = "l.middle_initial = r.middle_initial and l.last_name_12 = r.last_name_12"
 em_session_2 = linker.estimate_parameters_using_expectation_maximisation(
     blocking_rule_for_training,
@@ -419,41 +314,19 @@ em_session_2 = linker.estimate_parameters_using_expectation_maximisation(
     fix_probability_two_random_records_match=True,
 )
     
-
-
-
 em_session_2.m_u_values_interactive_history_chart()
     
-
-
-
 linker.match_weights_chart()
     
-
-
-
 linker.m_u_parameters_chart()
     
-
-
-
 linker.parameter_estimate_comparisons_chart()
     
-
-
-
 splink_settings = linker._settings_obj.as_dict()
     
-
-
-
 # Save these variables; this means that if you restart the kernel, you don't need to run this first part of the notebook again.
 # %store splink_settings
     
-
-
-
-
 from dataclasses import dataclass
 
 # Calculate this once to save time -- mapping from record_id to record_id_raw_input_file
@@ -678,16 +551,8 @@ def label_pairs_with_dataset(pairs):
 def replace_suffix_with_source_dataset(df, suffix, source_dataset):
     return df.rename(columns=lambda c: re.sub(f'_{suffix}$', f'_{source_dataset}', c))
     
-
-
-
 pvs_cascade = PVSCascade()
     
-
-
-
-
-
 pvs_cascade.start_module(
     name="geosearch",
     reference_file=geobase_reference_file,
@@ -707,19 +572,11 @@ pvs_cascade.start_module(
     ],
 )
     
-
-
-
-
 pvs_cascade.run_matching_pass(
     pass_name="geokey",
     blocking_columns=["geokey"],
 )
     
-
-
-
-
 def switch_first_and_last_names(df):
     return (
         df.rename(columns={"first_name": "last_name", "last_name": "first_name"})
@@ -729,9 +586,6 @@ def switch_first_and_last_names(df):
             .pipe(add_truncated_name_cols)
     )
     
-
-
-
 # We don't actually have any swapping of first and last names in pseudopeople
 pvs_cascade.run_matching_pass(
     pass_name="geokey name switch",
@@ -739,51 +593,26 @@ pvs_cascade.run_matching_pass(
     input_data_transformation=switch_first_and_last_names,
 )
     
-
-
-
-
 pvs_cascade.run_matching_pass(
     pass_name="house number and street name Soundex",
     blocking_columns=["street_number", "street_name_soundex"],
 )
     
-
-
-
-
 pvs_cascade.run_matching_pass(
     pass_name="house number and street name Soundex name switch",
     blocking_columns=["street_number", "street_name_soundex"],
     input_data_transformation=switch_first_and_last_names,
 )
     
-
-
-
-
 pvs_cascade.run_matching_pass(
     pass_name="some name and DOB information",
     blocking_columns=["first_name_2", "last_name_2", "year_of_birth"],
 )
     
-
-
-
-
 pvs_cascade.confirm_piks()
     
-
-
-
 pvs_cascade.confirmed_piks.groupby(["module_name", "pass_name"]).size().sort_values(ascending=False)
     
-
-
-
-
-
-
 pvs_cascade.start_module(
     name="namesearch",
     reference_file=name_dob_reference_file,
@@ -799,57 +628,30 @@ pvs_cascade.start_module(
     ],
 )
     
-
-
-
-
 pvs_cascade.run_matching_pass(
     pass_name="DOB and NYSIIS of name",
     blocking_columns=["day_of_birth", "month_of_birth", "year_of_birth", "first_name_nysiis", "last_name_nysiis"],
 )
     
-
-
-
-
 pvs_cascade.run_matching_pass(
     pass_name="DOB and initials",
     blocking_columns=["day_of_birth", "month_of_birth", "year_of_birth", "first_name_1", "last_name_1"],
 )
     
-
-
-
-
 pvs_cascade.run_matching_pass(
     pass_name="year of birth and first two characters of name",
     blocking_columns=["year_of_birth", "first_name_2", "last_name_2"],
 )
     
-
-
-
-
 pvs_cascade.run_matching_pass(
     pass_name="birthday and first two characters of name",
     blocking_columns=["day_of_birth", "month_of_birth", "first_name_2", "last_name_2"],
 )
     
-
-
-
-
 pvs_cascade.confirm_piks()
     
-
-
-
 pvs_cascade.confirmed_piks.groupby(["module_name", "pass_name"]).size().sort_values(ascending=False)
     
-
-
-
-
 pvs_cascade.start_module(
     name="dobsearch",
     reference_file=name_dob_reference_file,
@@ -865,59 +667,31 @@ pvs_cascade.start_module(
     ],
 )
     
-
-
-
-
 pvs_cascade.run_matching_pass(
     pass_name="initials name switch",
     blocking_columns=["first_name_1", "last_name_1"],
     input_data_transformation=switch_first_and_last_names,
 )
     
-
-
-
-
 pvs_cascade.run_matching_pass(
     pass_name="first three characters of name",
     blocking_columns=["first_name_3", "last_name_3"],
 )
     
-
-
-
-
 pvs_cascade.run_matching_pass(
     pass_name="reverse Soundex of name",
     blocking_columns=["first_name_reverse_soundex", "last_name_reverse_soundex"],
 )
     
-
-
-
-
 pvs_cascade.run_matching_pass(
     pass_name="first two characters of first name and year of birth",
     blocking_columns=["first_name_2", "year_of_birth"],
 )
     
-
-
-
-
 pvs_cascade.confirm_piks()
     
-
-
-
 pvs_cascade.confirmed_piks.groupby(["module_name", "pass_name"]).size().sort_values(ascending=False)
     
-
-
-
-
-
 # TODO: As of now in pseudopeople, our only indicator in the Census data of household
 # is the geokey itself. This can be messed up by noise, so we should switch to using
 # a (presumably low-noise) household indicator when we have that.
@@ -935,20 +709,11 @@ piks_with_household = (
 someone_piked = piks_with_household[piks_with_household.pik.notnull()].groupby("household_id").pik.nunique() > 0
 someone_unpiked = piks_with_household[piks_with_household.pik.isnull()].groupby("household_id").pik.nunique() > 0
     
-
-
-
 eligible_households = someone_piked & someone_unpiked
     
-
-
-
 piks_by_household = piks_with_household[["household_id", "pik"]].dropna(subset="pik").drop_duplicates()
 piks_by_household
     
-
-
-
 geokeys_by_household = (
     piks_by_household
         .merge(geobase_reference_file[["pik", "geokey"]].dropna(subset="geokey"), on="pik")
@@ -957,15 +722,9 @@ geokeys_by_household = (
 )
 geokeys_by_household
     
-
-
-
 records_to_search_by_household = geokeys_by_household.merge(geobase_reference_file, on="geokey")
 records_to_search_by_household
     
-
-
-
 # Apparently, we exclude from the reference file all *reference file* records with a PIK that
 # has already been assigned to an input file row.
 # Doing this goes against the normal assumption, which is that reference file records can match
@@ -976,9 +735,6 @@ records_to_search_by_household
 hhcomp_reference_file = records_to_search_by_household[~records_to_search_by_household.pik.isin(pvs_cascade.confirmed_piks.pik)]
 hhcomp_reference_file
     
-
-
-
 pvs_cascade.start_module(
     name="hhcompsearch",
     reference_file=hhcomp_reference_file,
@@ -994,53 +750,28 @@ pvs_cascade.start_module(
     ],
 )
     
-
-
-
-
 pvs_cascade.run_matching_pass(
     pass_name="initials",
     blocking_columns=["first_name_1", "last_name_1"],
 )
     
-
-
-
-
 pvs_cascade.run_matching_pass(
     pass_name="year of birth",
     blocking_columns=["year_of_birth"],
 )
     
-
-
-
-
 pvs_cascade.confirm_piks()
     
-
-
-
 pvs_cascade.confirmed_piks.groupby(["module_name", "pass_name"]).size().sort_values(ascending=False)
     
-
-
-
 pvs_cascade.confirmed_piks
     
-
-
-
-
 pik_values = (
     pvs_cascade.confirmed_piks
         .rename(columns={"record_id_raw_input_file": "record_id"})[["record_id", "pik"]]
         .drop_duplicates()
 )
     
-
-
-
 census_2030_piked = census_2030_raw_input.copy()
 census_2030_piked = census_2030_piked.merge(
     pik_values,
@@ -1050,109 +781,63 @@ census_2030_piked = census_2030_piked.merge(
 )
 census_2030_piked
     
-
-
-
 piked_proportion = census_2030_piked.pik.notnull().mean()
 # Compare with 90.28% of input records PIKed in the 2010 CUF,
 # as reported in Wagner and Layne, Table 2, p. 18 
 print(f'{piked_proportion:.2%} of the input records were PIKed')
     
-
-
-
 census_2030_piked.to_parquet('census_2030_piked_sample.parquet')
     
-
-
-
-
 # All modules, Medicare database, calculated from Layne, Wagner, and Rothhaas Table 1 (p. 15)
 real_life_pvs_accuracy = 1 - (2_585 + 60_709 + 129_480 + 89_094) / (52_406_981 + 5_170_924 + 49_374_794 + 50_327_034)
 f'{real_life_pvs_accuracy:.5%}'
     
-
-
-
 census_2030_ground_truth = (
     pd.read_parquet('generate_simulated_data/output/census_2030_ground_truth_sample.parquet')
         .set_index('record_id').simulant_id
 )
     
-
-
-
 reference_files_ground_truth = pd.concat([
     pd.read_parquet('generate_simulated_data/output/geobase_reference_file_ground_truth_sample.parquet'),
     pd.read_parquet('generate_simulated_data/output/name_dob_reference_file_ground_truth_sample.parquet'),
 ], ignore_index=True).set_index('record_id').simulant_id
 reference_files_ground_truth
     
-
-
-
 possible_to_pik_proportion = census_2030_ground_truth.isin(reference_files_ground_truth).mean()
 print(
     f'{(1 - possible_to_pik_proportion):.2%} of the input records are '
     'impossible to PIK correctly, since they are not in any reference files'
 )
     
-
-
-
 print(
     f'Assigned PIKs to {(piked_proportion / possible_to_pik_proportion):.2%} of PIK-able records'
 )
     
-
-
-
 # Multiple Census rows assigned the same PIK, indicating the model thinks they are duplicates in Census
 census_2030_piked.pik.value_counts().value_counts()
     
-
-
-
 # However, in this version of pseudopeople, there are no actual duplicates in Census
 assert not census_2030_ground_truth.duplicated().any()
     
-
-
-
 # Interesting: in pseudopeople, sometimes siblings are assigned the same (common) first name, making them almost identical.
 # The only giveaway is their age and DOB.
 # Presumably, this tends not to happen in real life.
 duplicate_piks = census_2030_piked.pik.value_counts()[census_2030_piked.pik.value_counts() > 1].index
 census_2030_piked[census_2030_piked.pik.isin(duplicate_piks)].sort_values('pik')
     
-
-
-
 pik_to_simulant_ground_truth = (
     pd.read_parquet('generate_simulated_data/output/pik_to_simulant_ground_truth.parquet')
         .set_index("pik").simulant_id
 )
 pik_to_simulant_ground_truth
     
-
-
-
 matched_simulant_id = census_2030_piked.set_index("record_id").pik.map(pik_to_simulant_ground_truth)
     
-
-
-
 census_2030_ground_truth[matched_simulant_id.notnull()]
     
-
-
-
 piks_correct_proportion = (matched_simulant_id[matched_simulant_id.notnull()] == census_2030_ground_truth[matched_simulant_id.notnull()]).mean()
 print(f'{piks_correct_proportion:.5%} of the PIKs assigned were correct; compare with {real_life_pvs_accuracy:.5%} in real life')
     
-
-
-
 confirmed_piks_with_ground_truth = pvs_cascade.confirmed_piks.copy()
 confirmed_piks_with_ground_truth["correct"] = (
     confirmed_piks_with_ground_truth.record_id_raw_input_file
@@ -1163,42 +848,26 @@ confirmed_piks_with_ground_truth["correct"] = (
 )
 confirmed_piks_with_ground_truth.correct.mean()
     
-
-
-
 # Accuracy by module -- note that this shows the opposite pattern (with the sample data)
 # relative to the results of Layne et al., who found GeoSearch was much *more* accurate
 confirmed_piks_with_ground_truth.groupby(["module_name"]).correct.mean().sort_values()
     
-
-
-
 # Accuracy by pass -- could be used to tune pass-specific cutoffs, but
 # this might not be too informative while we are still using the sample data.
 confirmed_piks_with_ground_truth.groupby(["module_name", "pass_name"]).correct.mean().sort_values()
     
-
-
-
-
 (
     confirmed_piks_with_ground_truth[~confirmed_piks_with_ground_truth.correct]
         .groupby(["module_name", "pass_name"])
         .size().sort_values()
 )
     
-
-
-
 incorrectly_linked_pairs = (
     confirmed_piks_with_ground_truth[~confirmed_piks_with_ground_truth.correct]
         [["record_id_census_2030", "record_id_reference_file"]].drop_duplicates()
 )
 incorrectly_linked_pairs
     
-
-
-
 census_incorrectly_linked = (
     census_2030
         .set_index("record_id")
@@ -1229,24 +898,8 @@ census_incorrectly_linked[comparison_cols].compare(
     keep_equal=True,
 )
     
-
-
-
 census_2030_piked.to_parquet('census_2030_piked_sample.parquet')
     
-
-
-
-
-    
-
-
-
 # Convert this notebook to a Python script
-# ! jupyter nbconvert --config ../../nbconvert_no_magic/config.py --to python --template ../../nbconvert_no_magic/template pvs_like_case_study_sample_data.ipynb
-    
-
-
-
-
+# ! ./convert_notebook.sh pvs_like_case_study_sample_data
     
