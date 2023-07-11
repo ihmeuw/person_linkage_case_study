@@ -210,14 +210,30 @@ geobase_reference_file
     
 name_dob_reference_file
     
+def estimate_number_true_matches(input_file, reference_file):
+    people_represented_in_input_file = (
+        input_file.record_id_raw_input_file.nunique() * 0.95
+    )
+    people_represented_in_reference_file = (
+        reference_file.pik.nunique() * 0.995
+    )
+    people_represented_in_both = people_represented_in_input_file * 0.9
+
+    # Assuming independence conditions as noted above, the number of true
+    # matches that should be found for *each* true person is the expected number
+    # of records in one file times the expected number of records in the other
+    input_file_records_per_person = people_represented_in_input_file / len(input_file)
+    reference_file_records_per_person = people_represented_in_reference_file / len(reference_file)
+    record_matches_per_person = input_file_records_per_person * reference_file_records_per_person
+
+    return people_represented_in_both * record_matches_per_person
+
 def probability_two_random_records_match(input_file, reference_file):
-    # NOTE: We use census_2030_raw_input instead of input_file in the numerator.
-    # This is the original CUF, with only unintentional duplicates.
-    # The input_file has *intentional* duplicates: records for the same person
-    # with nickname and formal name.
-    cuf_records = len(census_2030_raw_input)
     cartesian_product = len(input_file) * len(reference_file)
-    return (cuf_records * 0.90) / cartesian_product
+    return (
+        estimate_number_true_matches(input_file, reference_file) /
+        cartesian_product
+    )
 
 probability_two_random_records_match(census_2030, geobase_reference_file)
     
@@ -392,7 +408,7 @@ class PVSModule:
         self,
         pass_name,
         blocking_columns,
-        probability_threshold=0.995,
+        probability_threshold=0.99,
         input_data_transformation=lambda x: x,
         already_confirmed_piks=pd.DataFrame(columns=["record_id_raw_input_file"]),
     ):
