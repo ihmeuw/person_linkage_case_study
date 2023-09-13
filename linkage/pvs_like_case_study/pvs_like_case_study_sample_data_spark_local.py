@@ -5,44 +5,24 @@
 # Edit with care -- substantive edits should go in the notebook,
 # or they will be overwritten the next time this script is generated.
 
-
-
-
 import re
 import pandas as pd, numpy as np
     
-
-
-
-
 reference_file = pd.read_parquet('reference_file_sample.parquet')
 census_2030 = pd.read_parquet('census_2030_sample.parquet')
     
-
-
-
-
 # Use NaN for all forms of missingness, including empty string
 reference_file = reference_file.fillna(np.nan).replace('', np.nan)
 census_2030 = census_2030.fillna(np.nan).replace('', np.nan)
     
-
-
-
 # We want to compare mailing address with physical address
 reference_file = reference_file.rename(columns=lambda c: c.replace('mailing_address_', ''))
     
-
-
-
 # My working theory: the purpose of the "geokey" is because address parts violate conditional independence
 get_geokey = lambda x: (x.street_number + ' ' + x.street_name + ' ' + x.unit_number.fillna('') + ' ' + x.city + ' ' + x.state.astype(str) + ' ' + x.zipcode).str.strip().str.split().str.join(' ')
 reference_file = reference_file.assign(geokey=get_geokey)
 census_2030 = census_2030.assign(geokey=get_geokey)
     
-
-
-
 # Add columns used to "cut the database": ZIP3 and a grouping of first and last initial
 reference_file = reference_file.assign(zip3=lambda x: x.zipcode.str[:3])
 census_2030 = census_2030.assign(zip3=lambda x: x.zipcode.str[:3])
@@ -53,28 +33,13 @@ initial_cut = lambda x: x.fillna('A').str[0].replace('A', 'A-or-blank').replace(
 reference_file = reference_file.assign(first_initial_cut=lambda x: initial_cut(x.first_name), last_initial_cut=lambda x: initial_cut(x.last_name))
 census_2030 = census_2030.assign(first_initial_cut=lambda x: initial_cut(x.first_name), last_initial_cut=lambda x: initial_cut(x.last_name))
     
-
-
-
-
 reference_file
     
-
-
-
 census_2030
     
-
-
-
-
-
 common_cols = [c for c in reference_file.columns if c in census_2030.columns]
 common_cols
     
-
-
-
 def prep_table_for_splink(df, dataset_name):
     return (
         df[common_cols]
@@ -83,22 +48,13 @@ def prep_table_for_splink(df, dataset_name):
 
 tables_for_splink = [prep_table_for_splink(reference_file, "reference_file"), prep_table_for_splink(census_2030, "census_2030")]
     
-
-
-
 [len(t) for t in tables_for_splink]
     
-
-
-
 # estimate_probability_two_random_records_match did not seem to give me a reasonable estimate
 # we estimate that around 90% of the census are present in the reference file
 probability_two_random_records_match = (0.90 * len(census_2030)) / (len(reference_file) * len(census_2030))
 probability_two_random_records_match
     
-
-
-
 from splink.spark.comparison_library import (
     exact_match,
     levenshtein_at_thresholds,
@@ -166,9 +122,6 @@ warnings.filterwarnings("ignore", category=FutureWarning)
 #     input_table_aliases=["reference_file", "census_2030"]
 # )
     
-
-
-
 # So it turns out that even when using Spark, splink uses DuckDB a little bit
 # I get a totally bizarre error that only happens the first time DuckDB is called
 # This "flushes it out"?!?
@@ -185,9 +138,6 @@ except duckdb.InvalidInputException:
 
 duckdb.sql('SELECT i * 3 AS k FROM r1').show()
     
-
-
-
 # NOTE: This is not reproducible!
 linker.estimate_u_using_random_sampling(max_pairs=1e5)
 
@@ -197,45 +147,23 @@ linker.estimate_parameters_using_expectation_maximisation(blocking_rule_for_trai
 blocking_rule_for_training = "l.geokey = r.geokey"
 linker.estimate_parameters_using_expectation_maximisation(blocking_rule_for_training, fix_probability_two_random_records_match=True)
     
-
-
-
 linker.match_weights_chart()
     
-
-
-
 # NOTE: EM appears to be finding people in the same family instead of the same person!
 # See first_name m probabilities.
 # For now, I address this by almost always blocking on first name.
 # More experimentation needed to get reasonable values here.
 linker.m_u_parameters_chart()
     
-
-
-
 linker.parameter_estimate_comparisons_chart()
     
-
-
-
 splink_settings = linker._settings_obj.as_dict()
     
-
-
-
 PROBABILITY_THRESHOLD = 0.85
     
-
-
-
 # Save these variables; this means that if you restart the kernel, you don't need to run this first part of the notebook again.
 # %store splink_settings PROBABILITY_THRESHOLD
     
-
-
-
-
 # Calculate this once to save time -- mapping from record_id to index of each dataframe
 reference_file_index_of_ids = reference_file.reset_index().set_index('record_id')['index']
 census_index_of_ids = census_2030.reset_index().set_index('record_id')['index']
@@ -307,286 +235,112 @@ def pvs_matching_pass(blocking_cols):
     
     return all_combos, links
     
-
-
-
-
 def geosearch_pass(blocking_cols):
     return pvs_matching_pass(["zip3"] + blocking_cols)
     
-
-
-
-
 census_2030['pik'] = np.nan
     
-
-
-
 all_combos, pik_pairs = geosearch_pass(["first_name", "middle_initial", "last_name", "geokey"])
     
-
-
-
-
 all_combos
     
-
-
-
 pik_pairs
     
-
-
-
-
 all_combos, pik_pairs = geosearch_pass(["first_name", "geokey"])
     
-
-
-
-
 all_combos
     
-
-
-
 pik_pairs
     
-
-
-
-
 all_combos, pik_pairs = geosearch_pass(["first_name", "middle_initial", "last_name", "street_number", "street_name"])
     
-
-
-
-
 all_combos
     
-
-
-
 pik_pairs
     
-
-
-
-
 all_combos, pik_pairs = geosearch_pass(["first_name", "street_number", "street_name"])
     
-
-
-
-
 all_combos
     
-
-
-
 pik_pairs
     
-
-
-
-
 all_combos, pik_pairs = geosearch_pass(["first_name", "last_name"])
     
-
-
-
-
 all_combos
     
-
-
-
 pik_pairs
     
-
-
-
 all_combos
     
-
-
-
 pik_pairs
     
-
-
-
-
 def namesearch_pass(blocking_cols):
     return pvs_matching_pass(["first_initial_cut", "last_initial_cut"] + blocking_cols)
     
-
-
-
-
 all_combos, pik_pairs = namesearch_pass(["first_name", "middle_initial", "last_name", "date_of_birth"])
     
-
-
-
-
 all_combos
     
-
-
-
 pik_pairs
     
-
-
-
-
 all_combos, pik_pairs = namesearch_pass(["first_name", "date_of_birth"])
     
-
-
-
-
 all_combos
     
-
-
-
 pik_pairs
     
-
-
-
-
 all_combos, pik_pairs = namesearch_pass(["last_name", "date_of_birth"])
     
-
-
-
-
 all_combos
     
-
-
-
 pik_pairs
     
-
-
-
-
 all_combos, pik_pairs = namesearch_pass(["date_of_birth"])
     
-
-
-
-
 all_combos
     
-
-
-
 pik_pairs
     
-
-
-
-
 # Sentinel value represents matching to more than one PIK
 census_2030[census_2030.pik == -1]
     
-
-
-
 census_2030.loc[census_2030.pik == -1, 'pik'] = np.nan
     
-
-
-
-
 census_2030
     
-
-
-
 census_2030.pik.notnull().mean()
     
-
-
-
 census_2030_ground_truth = pd.read_parquet('census_2030_ground_truth_sample.parquet').set_index('record_id').simulant_id
 reference_file_ground_truth = pd.read_parquet('reference_file_ground_truth_sample.parquet').set_index('record_id').simulant_id
     
-
-
-
 # Not possible to be PIKed, since they are truly not in the reference file
 (~census_2030_ground_truth.isin(reference_file_ground_truth)).mean()
     
-
-
-
 census_2030.pik.notnull().mean() / census_2030_ground_truth.isin(reference_file_ground_truth).mean()
     
-
-
-
 # Multiple Census rows assigned the same PIK, indicating the model thinks they are duplicates in Census
 census_2030.pik.value_counts().value_counts()
     
-
-
-
 # However, in this version of pseudopeople, there are no actual duplicates in Census
 assert not census_2030_ground_truth.duplicated().any()
     
-
-
-
 # Interesting: in pseudopeople, sometimes siblings are assigned the same (common) first name, making them almost identical.
 # The only giveaway is their age and DOB.
 # Presumably, this tends not to happen in real life.
 duplicate_piks = census_2030.pik.value_counts()[census_2030.pik.value_counts() > 1].index
 census_2030[census_2030.pik.isin(duplicate_piks)].sort_values('pik')
     
-
-
-
-
 pik_simulant_id = census_2030.pik.map(reference_file_ground_truth)
 pik_simulant_id
     
-
-
-
 (pik_simulant_id[pik_simulant_id.notnull()] == census_2030_ground_truth[pik_simulant_id.notnull()]).mean()
     
-
-
-
 errors = census_2030[census_2030.pik.notnull() & (pik_simulant_id != census_2030_ground_truth)]
 confused_for = reference_file.set_index('record_id').loc[errors.pik].reset_index().set_index(errors.index)
 errors[common_cols].compare(confused_for[common_cols], keep_shape=True, keep_equal=True)
     
-
-
-
 census_2030.to_parquet('census_2030_with_piks_sample.parquet')
     
-
-
-
-
-    
-
-
-
 # Convert this notebook to a Python script
-# ! jupyter nbconvert --config ../../nbconvert_no_magic/config.py --to python --template ../../nbconvert_no_magic/template pvs_like_case_study_sample_data_spark_local.ipynb
-    
-
-
-
-
+# ! ./convert_notebook.sh pvs_like_case_study_sample_data_spark_local
     
