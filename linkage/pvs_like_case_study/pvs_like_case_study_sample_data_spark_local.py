@@ -200,7 +200,6 @@ linker.estimate_parameters_using_expectation_maximisation(blocking_rule_for_trai
 
 
 
-# Note: I don't know why this is erroring, but not worried about it for now
 linker.match_weights_chart()
     
 
@@ -215,7 +214,6 @@ linker.m_u_parameters_chart()
 
 
 
-# Note: I don't know why this is erroring, but not worried about it for now
 linker.parameter_estimate_comparisons_chart()
     
 
@@ -585,7 +583,7 @@ census_2030.to_parquet('census_2030_with_piks_sample.parquet')
 
 
 # Convert this notebook to a Python script
-# ! jupyter nbconvert --config ../../nbconvert_no_magic/config.py --to python --template ../../nbconvert_no_magic/template pvs_like_case_study_sample_data_spark.ipynb
+# ! jupyter nbconvert --config ../../nbconvert_no_magic/config.py --to python --template ../../nbconvert_no_magic/template pvs_like_case_study_sample_data_spark_local.ipynb
     
 
 
