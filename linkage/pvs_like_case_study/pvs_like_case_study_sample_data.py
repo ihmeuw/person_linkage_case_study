@@ -9,17 +9,9 @@ import re, copy
 import pandas as pd, numpy as np
 import jellyfish
     
-# It's not easy to programmatically display direct dependencies separate from transitive
-# dependencies.
-# This environment was created by:
-# $ conda create -n <name> python=3.10
-# $ conda activate <name>
-# $ pip install pandas numpy matplotlib pseudopeople splink jupyterlab jellyfish
-# ! conda env export | grep -v 'prefix:' | tee conda_environment.yaml
-    
-census_2030 = pd.read_parquet('generate_simulated_data/output/census_2030_sample.parquet')
-geobase_reference_file = pd.read_parquet('generate_simulated_data/output/geobase_reference_file_sample.parquet')
-name_dob_reference_file = pd.read_parquet('generate_simulated_data/output/name_dob_reference_file_sample.parquet')
+census_2030 = pd.read_parquet('generate_simulated_data/output/census_2030_small_sample.parquet')
+geobase_reference_file = pd.read_parquet('generate_simulated_data/output/geobase_reference_file_small_sample.parquet')
+name_dob_reference_file = pd.read_parquet('generate_simulated_data/output/name_dob_reference_file_small_sample.parquet')
     
 # Input file before any processing; the final result will be this with the PIK column added
 census_2030_raw_input = census_2030.copy()
@@ -103,16 +95,19 @@ census_2030 = census_2030[
 geobase_reference_file = geobase_reference_file.rename(columns=lambda c: c.replace('mailing_address_', ''))
     
 # PVS uses DOB as separate fields for day, month, and year
-def split_dob(df):
+def split_dob(df, date_format='%Y%m%d'):
     df = df.copy()
-    # Have to be floats, because there is missingness, and we want to treat as numeric for assessing similarity
-    # Note that as of now, none of our pseudopeople noise types would change the punctuation ("/") in the date, nor would
-    # they insert non-numeric characters here.
-    # In the future, this might happen, and this simple parsing would need more error handling.
-    df[['month_of_birth', 'day_of_birth', 'year_of_birth']] = df.date_of_birth.str.split('/', expand=True).astype(float)
+    # Have to be floats because we want to treat as numeric for assessing similarity
+    # Note that as of now, none of our pseudopeople noise types would change the punctuation ("/") in the date, but
+    # they can insert non-numeric characters here or otherwise create invalid dates, in which case we fail to parse the date
+    # and treat it as missing.
+    dob = pd.to_datetime(df.date_of_birth, format=date_format, errors='coerce')
+    df['month_of_birth'] = dob.dt.month
+    df['year_of_birth'] = dob.dt.year
+    df['day_of_birth'] = dob.dt.day
     return df.drop(columns=['date_of_birth'])
 
-census_2030 = split_dob(census_2030)
+census_2030 = split_dob(census_2030, date_format='%m/%d/%Y')
 geobase_reference_file = split_dob(geobase_reference_file)
 name_dob_reference_file = split_dob(name_dob_reference_file)
     
@@ -148,6 +143,9 @@ def add_truncated_name_cols(df):
     df = df.copy()
     df['first_name_15'] = df.first_name.str[:15]
     df['last_name_12'] = df.last_name.str[:12]
+
+    if 'middle_name' in df.columns and 'middle_initial' not in df.columns:
+        df['middle_initial'] = df.middle_name.str[:1]
 
     for num_chars in [1, 2, 3]:
         df[f'first_name_{num_chars}'] = df.first_name.str[:num_chars]
@@ -356,7 +354,7 @@ all_piks = pd.concat([
 ], ignore_index=True).set_index("record_id").pik
 
 dates_of_death = (
-    pd.read_parquet('generate_simulated_data/output/census_numident_sample.parquet')
+    pd.read_parquet('generate_simulated_data/output/census_numident_small_sample.parquet')
         .set_index('pik')
         .date_of_death
         .pipe(lambda s: pd.to_datetime(s, format='%Y%m%d', errors='coerce'))
@@ -802,20 +800,20 @@ piked_proportion = census_2030_piked.pik.notnull().mean()
 # as reported in Wagner and Layne, Table 2, p. 18 
 print(f'{piked_proportion:.2%} of the input records were PIKed')
     
-census_2030_piked.to_parquet('census_2030_piked_sample.parquet')
+census_2030_piked.to_parquet('census_2030_piked_small_sample.parquet')
     
 # All modules, Medicare database, calculated from Layne, Wagner, and Rothhaas Table 1 (p. 15)
 real_life_pvs_accuracy = 1 - (2_585 + 60_709 + 129_480 + 89_094) / (52_406_981 + 5_170_924 + 49_374_794 + 50_327_034)
 f'{real_life_pvs_accuracy:.5%}'
     
 census_2030_ground_truth = (
-    pd.read_parquet('generate_simulated_data/output/census_2030_ground_truth_sample.parquet')
+    pd.read_parquet('generate_simulated_data/output/census_2030_ground_truth_small_sample.parquet')
         .set_index('record_id').simulant_id
 )
     
 reference_files_ground_truth = pd.concat([
-    pd.read_parquet('generate_simulated_data/output/geobase_reference_file_ground_truth_sample.parquet'),
-    pd.read_parquet('generate_simulated_data/output/name_dob_reference_file_ground_truth_sample.parquet'),
+    pd.read_parquet('generate_simulated_data/output/geobase_reference_file_ground_truth_small_sample.parquet'),
+    pd.read_parquet('generate_simulated_data/output/name_dob_reference_file_ground_truth_small_sample.parquet'),
 ], ignore_index=True).set_index('record_id').simulant_id
 reference_files_ground_truth
     
@@ -842,7 +840,7 @@ duplicate_piks = census_2030_piked.pik.value_counts()[census_2030_piked.pik.valu
 census_2030_piked[census_2030_piked.pik.isin(duplicate_piks)].sort_values('pik')
     
 pik_to_simulant_ground_truth = (
-    pd.read_parquet('generate_simulated_data/output/pik_to_simulant_ground_truth.parquet')
+    pd.read_parquet('generate_simulated_data/output/pik_to_simulant_ground_truth_small_sample.parquet')
         .set_index("pik").simulant_id
 )
 pik_to_simulant_ground_truth
@@ -914,7 +912,7 @@ census_incorrectly_linked[comparison_cols].compare(
     keep_equal=True,
 )
     
-census_2030_piked.to_parquet('census_2030_piked_sample.parquet')
+census_2030_piked.to_parquet('census_2030_piked_small_sample.parquet')
     
 # Convert this notebook to a Python script
 # ! ./convert_notebook.sh pvs_like_case_study_sample_data

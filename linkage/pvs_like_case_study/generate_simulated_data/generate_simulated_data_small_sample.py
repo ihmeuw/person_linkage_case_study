@@ -8,7 +8,7 @@
 import pseudopeople as psp
 import pandas as pd, numpy as np
     
-# !pip freeze | grep pseudopeople
+psp.__version__
     
 default_configuration = psp.get_config()
     
@@ -121,8 +121,21 @@ ssa_numident
 ssa_numident_ground_truth = ssa_numident.set_index('record_id').simulant_id
 ssa_numident = ssa_numident.drop(columns=['simulant_id'])
     
-tax_years = list(range(2020, 2030))
+tax_years = list(range(2025, 2030))
 tax_years
+    
+# %%time
+
+# Combine 1040 for all years, adding a tax_year column to track which tax year each row came from.
+taxes_1040 = pd.concat([
+    psp.generate_taxes_1040(year=year, config=custom_configuration).assign(tax_year=year, tax_form='1040') for year in tax_years
+], ignore_index=True)
+taxes_1040 = add_unique_record_id(taxes_1040, '1040')
+taxes_1040 = record_id_to_single_source_record(taxes_1040)
+taxes_1040
+    
+taxes_1040_ground_truth = taxes_1040.set_index('record_id').simulant_id
+taxes_1040 = taxes_1040.drop(columns=['simulant_id'])
     
 # %%time
 
@@ -137,32 +150,18 @@ w2_1099
 w2_1099_ground_truth = w2_1099.set_index('record_id').simulant_id
 w2_1099 = w2_1099.drop(columns=['simulant_id'])
     
+taxes = pd.concat([taxes_1040, w2_1099], ignore_index=True)
+    
+taxes_ground_truth = pd.concat([taxes_1040_ground_truth, w2_1099_ground_truth])
+    
 # "IRS records do not contain DOB, and many of the records contain only the first four letters of the last name."
 # (Brown et al. 2023, p.30, footnote 19)
 # This should be updated in pseudopeople but for now we do it here.
 # Note that the name part only matters for ITIN PIKing since for SSNs that are present in SSA we use name from SSA.
-w2_1099 = w2_1099.drop(columns=['date_of_birth'])
-
 PROPORTION_OF_IRS_RECORDS_WITH_TRUNCATION = 0.4 # is this a good guess at "many" in the quote above?
-idx_to_truncate = w2_1099.sample(frac=PROPORTION_OF_IRS_RECORDS_WITH_TRUNCATION, random_state=1234).index
-w2_1099.loc[idx_to_truncate, 'last_name'] = w2_1099.loc[idx_to_truncate, 'last_name'].str[:4]
-w2_1099.loc[idx_to_truncate, 'last_name']
-    
-# Slightly hacky workaround for a bug in pseudopeople with the type of the PO box column
-# We make sure everything is a string and remove the decimal part
-# (we know the decimal point will still be there since there is no noise type that currently affects punctuation)
-po_box_fixed = w2_1099.mailing_address_po_box.astype(str).str.replace('\\..*$', '', regex=True).replace('nan', np.nan)
-
-# Floats are only present when it is NaN
-assert po_box_fixed[po_box_fixed.apply(type) == float].isnull().all()
-# The values that are present never contain decimals
-assert not po_box_fixed[(po_box_fixed.apply(type) == str)].str.contains('.', regex=False).any()
-
-po_box_fixed.apply(type).value_counts()
-    
-po_box_fixed[po_box_fixed.notnull()]
-    
-w2_1099['mailing_address_po_box'] = po_box_fixed
+idx_to_truncate = taxes.sample(frac=PROPORTION_OF_IRS_RECORDS_WITH_TRUNCATION, random_state=1234).index
+taxes.loc[idx_to_truncate, 'last_name'] = taxes.loc[idx_to_truncate, 'last_name'].str[:4]
+taxes.loc[idx_to_truncate, 'last_name']
     
 # %%time
 
@@ -174,21 +173,9 @@ census_2030
 census_2030_ground_truth = census_2030.set_index('record_id').simulant_id
 census_2030 = census_2030.drop(columns=['simulant_id'])
     
-# Similar to the above issue with PO box, there is weird type stuff with age
-age_fixed = census_2030['age'].astype(str).replace('nan', np.nan)
-
-assert age_fixed[age_fixed.apply(type) == float].isnull().all()
-assert not age_fixed[age_fixed.apply(type) == str].str.contains('.', regex=False).any()
-
-age_fixed.apply(type).value_counts()
-    
-age_fixed[age_fixed.notnull()]
-    
-census_2030['age'] = age_fixed
-    
 source_record_ground_truth = pd.concat([
     ssa_numident_ground_truth,
-    w2_1099_ground_truth,
+    taxes_ground_truth,
     census_2030_ground_truth,
 ])
 source_record_ground_truth
@@ -197,7 +184,7 @@ def fill_dates(df, fill_with):
     return (
         # Replace invalid dates with nans
         pd.to_datetime(df.event_date, format='%Y%m%d', errors='coerce')
-            .fillna(pd.Timestamp('2100-01-01' if fill_with == 'latest' else '1900-01-01'))
+            .fillna(pd.to_datetime('2100-01-01' if fill_with == 'latest' else '1900-01-01'))
     )
 
 def best_data_from_columns(df, columns, best_is_latest=True):
@@ -219,7 +206,7 @@ def best_data_from_columns(df, columns, best_is_latest=True):
 
 best_name = best_data_from_columns(
     ssa_numident,
-    columns=['first_name', 'middle_initial', 'last_name'],
+    columns=['first_name', 'middle_name', 'last_name'],
 )
 
 best_date_of_birth = best_data_from_columns(
@@ -240,7 +227,7 @@ census_numident = merge_preserving_source_records(
 census_numident = add_unique_record_id(census_numident, 'census_numident')
 census_numident
     
-alternate_name_numident = dedupe_preserving_source_records(ssa_numident, ['ssn', 'first_name', 'middle_initial', 'last_name'])
+alternate_name_numident = dedupe_preserving_source_records(ssa_numident, ['ssn', 'first_name', 'middle_name', 'last_name'])
 alternate_name_numident = add_unique_record_id(alternate_name_numident, 'alternate_name_numident')
 alternate_name_numident
     
@@ -268,7 +255,7 @@ name_dob_numident_records[name_dob_numident_records.ssn.duplicated(keep=False)].
 # Analogous to the process of getting alternate names and dates of birth
 # from SSA, we retain all versions of the name from taxes.
 name_for_itins = dedupe_preserving_source_records(
-    w2_1099[w2_1099.ssn.notnull() & w2_1099.ssn.str.startswith('9')],
+    taxes_1040[taxes_1040.ssn.notnull() & taxes_1040.ssn.str.startswith('9')],
     ['ssn', 'first_name', 'middle_initial', 'last_name'],
 )
 name_for_itins
@@ -286,7 +273,7 @@ name_dob_reference_file = pd.concat([
 name_dob_reference_file = add_unique_record_id(name_dob_reference_file, 'name_dob_reference_file')
 name_dob_reference_file
     
-address_cols = list(w2_1099.filter(like='mailing_address').columns)
+address_cols = list(taxes.filter(like='mailing_address').columns)
 
 def standardize_address_part(column):
     return (
@@ -305,7 +292,7 @@ def standardize_address_part(column):
     )
 
 addresses_by_ssn = dedupe_preserving_source_records(
-    w2_1099.set_index(['ssn', 'source_record_ids'])
+    taxes.set_index(['ssn', 'source_record_ids'])
         [address_cols]
         .apply(standardize_address_part)
         .reset_index(),
@@ -398,7 +385,7 @@ most_collisions = geobase_reference_file.set_index('record_id').loc[source_recor
 most_collisions
     
 # Individual tax filings causing those collisions
-w2_1099[w2_1099.record_id.isin(most_collisions.source_record_ids)]
+taxes[taxes.record_id.isin(most_collisions.source_record_ids)]
     
 # Correct value: who actually has the SSN
 ssa_numident[ssa_numident.ssn == most_collisions.ssn]
@@ -485,5 +472,5 @@ for file_name, (file, ground_truth) in files.items():
 pik_to_simulant.reset_index().to_parquet(f'output/pik_to_simulant_ground_truth.parquet')
     
 # Convert this notebook to a Python script
-# ! ../convert_notebook.sh generate_simulated_data_small_sample
+# ! cd .. && ./convert_notebook.sh generate_simulated_data/generate_simulated_data_small_sample
     
