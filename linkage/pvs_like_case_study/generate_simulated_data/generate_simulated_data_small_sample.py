@@ -154,10 +154,10 @@ taxes = pd.concat([taxes_1040, w2_1099], ignore_index=True)
     
 taxes_ground_truth = pd.concat([taxes_1040_ground_truth, w2_1099_ground_truth])
     
-# "IRS records do not contain DOB, and many of the records contain only the first four letters of the last name."
+# "... many of the [IRS] records contain only the first four letters of the last name."
 # (Brown et al. 2023, p.30, footnote 19)
 # This should be updated in pseudopeople but for now we do it here.
-# Note that the name part only matters for ITIN PIKing since for SSNs that are present in SSA we use name from SSA.
+# Note that this truncation only matters for ITIN PIKing since for SSNs that are present in SSA we use name from SSA.
 PROPORTION_OF_IRS_RECORDS_WITH_TRUNCATION = 0.4 # is this a good guess at "many" in the quote above?
 idx_to_truncate = taxes.sample(frac=PROPORTION_OF_IRS_RECORDS_WITH_TRUNCATION, random_state=1234).index
 taxes.loc[idx_to_truncate, 'last_name'] = taxes.loc[idx_to_truncate, 'last_name'].str[:4]
@@ -392,11 +392,7 @@ ssa_numident[ssa_numident.ssn == most_collisions.ssn]
     
 ssa_numident_ground_truth.loc[ssa_numident[ssa_numident.ssn == most_collisions.ssn].record_id]
     
-# We see here that our "mode" approach to ground truth would not be correct --
-# the people borrowing the SSN outnumber the person who actually holds it
-source_record_simulants.apply(mode).loc[most_collisions.record_id]
-    
-# So, let's prioritize the use of SSA records
+# Let's prioritize the use of SSA records
 source_record_simulants_based_on_ssa_only = get_simulants_of_source_records(geobase_reference_file, filter_record_ids=lambda r_id: 'ssa_numident_' in r_id)
     
 geobase_reference_file_ground_truth = (
