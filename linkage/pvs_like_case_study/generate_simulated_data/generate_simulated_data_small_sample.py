@@ -5,10 +5,106 @@
 # Edit with care -- substantive edits should go in the notebook,
 # or they will be overwritten the next time this script is generated.
 
+# DO NOT EDIT if this notebook is not called generate_simulated_data_small_sample.ipynb!
+# This notebook is designed to be run with papermill; this cell is tagged 'parameters'
+# If running with the default parameters, you can overwrite this notebook; otherwise,
+# save it to another filename.
+# TODO: Rename the notebook to omit 'small_sample' in the filename and omit all outputs
+# from the 'canonical version'
+data_to_use = 'small_sample'
+output_dir = 'output'
+compute_engine = 'pandas'
+num_jobs = 3
+memory_per_job = "50GB"
+    
+# ! date
+    
+import warnings
+warnings.simplefilter(action='ignore', category=FutureWarning)
+    
 import pseudopeople as psp
-import pandas as pd, numpy as np
+import numpy as np
+import os
+import logging
     
 psp.__version__
+    
+# Importing pandas for access, regardless of whether we are using it as the compute engine
+import pandas
+    
+if compute_engine == 'pandas':
+    import pandas as pd
+elif compute_engine.startswith('modin'):
+    if compute_engine.startswith('modin_dask_'):
+        import modin.config as modin_cfg
+        modin_cfg.Engine.put("dask") # Use dask instead of ray (which is the default)
+
+        import dask
+
+        if compute_engine == 'modin_dask_distributed':
+            from dask_jobqueue import SLURMCluster
+
+            num_processes_per_job = 1
+            cluster = SLURMCluster(
+                queue='long.q',
+                account="proj_simscience",
+                # If you give dask workers more than one core, they will use it to
+                # run more tasks at once.
+                # There doesn't appear to be an easy way to have more than one thread
+                # per worker but use them all for multi-threading code in one task
+                # at a time (note that processes=1 does *not* do this).
+                # It can be done with custom resource definitions, but that seems like
+                # much more trouble than it's worth, since it would require modifying
+                # both pseudopeople and Modin to use them.
+                cores=1,
+                memory=memory_per_job,
+                walltime="10-00:00:00",
+                # Dask distributed looks at OS-reported memory to decide whether a worker is running out.
+                # If the memory allocator is not returning the memory to the OS promptly (even when holding onto it
+                # is smart), it will lead Dask to make bad decisions.
+                # By default, pyarrow uses jemalloc, but I could not get that to release memory quickly.
+                # Even this doesn't seem to be completely working, but in combination with small-ish partitions
+                # it seems to do okay -- unmanaged memory does seem to shrink from time to time, which it wasn't
+                # previously doing.
+                job_script_prologue="export ARROW_DEFAULT_MEMORY_POOL=system\nexport MALLOC_TRIM_THRESHOLD_=0",
+            )
+
+            cluster.scale(n=num_jobs)
+            # Supposedly, this will start new jobs if the existing
+            # ones fail for some reason.
+            # https://stackoverflow.com/a/61295019
+            cluster.adapt(minimum_jobs=num_jobs, maximum_jobs=num_jobs)
+
+            from distributed import Client
+            client = Client(cluster)
+        else:
+            from distributed import Client
+            cpus_available = int(os.environ['SLURM_CPUS_ON_NODE'])
+            client = Client(n_workers=int(cpus_available / 2), threads_per_worker=2)
+        
+        # Why is this necessary?!
+        # For some reason, if I don't set NPartitions, it seems to default to 0?!
+        num_row_groups = 334
+        modin_cfg.NPartitions.put(min(num_jobs * num_processes_per_job * 3, num_row_groups))
+
+        display(client)
+    elif compute_engine == 'modin_ray':
+        # Haven't worked on distributing this across multiple nodes
+        import ray
+        ray.init(runtime_env={'env_vars': {'__MODIN_AUTOIMPORT_PANDAS__': '1'}}, num_cpus=int(os.environ['SLURM_CPUS_ON_NODE']))
+    else:
+        # Use serial Python backend (good for debugging errors)
+        import modin.config as modin_cfg
+        modin_cfg.IsDebug.put(True)
+
+    import modin.pandas as pd
+
+    # https://modin.readthedocs.io/en/stable/usage_guide/advanced_usage/progress_bar.html
+    from modin.config import ProgressBar
+    ProgressBar.enable()
+    
+assert data_to_use in ('small_sample', 'usa')
+pseudopeople_input_dir = None if data_to_use == 'small_sample' else '/mnt/team/simulation_science/priv/engineering/vivarium_census_prl_synth_pop/results/release_02_yellow/full_data/united_states_of_america/2023_07_28_08_33_09/final_results/2023_08_16_09_58_54/pseudopeople_input_data_usa/'
     
 default_configuration = psp.get_config()
     
@@ -63,59 +159,106 @@ def add_unique_record_id(df, dataset_name):
     df['record_id'] = f'{dataset_name}_' + df.record_id.astype(str)
     return df
 
-# Initializes the source_record_ids column.
+# Initializes a table listing the pairs between record_ids and source record_ids.
 # Should only be called on "source records"; that is, records that
 # come directly out of pseudopeople.
-def record_id_to_single_source_record(df, source_col='record_id'):
-    df = df.copy()
-    df['source_record_ids'] = df[source_col].apply(lambda x: (x,))
-    return df
+def record_id_to_single_source_record_pairs(df, source_col='record_id'):
+    if source_col == 'record_id':
+        # We can't have duplicate column names, so we make a new column
+        # literally called 'source_col'
+        df = df.assign(source_col=lambda df: df[source_col])
+        source_col = 'source_col'
+
+    return df[['record_id', source_col]].rename(columns={source_col: 'source_record_id'})
     
 # Operations that aggregate records, combining the source_record_ids column
 # between all records that are aggregated into a single row
 
-def merge_preserving_source_records(dfs, *args, **kwargs):
-    dfs = [df.drop(columns=['record_id'], errors='ignore') for df in dfs]
+def merge_preserving_source_records(dfs, source_record_pairings, new_record_id_prefix, *args, **kwargs):
+    assert len(dfs) == len(source_record_pairings)
     for df in dfs:
-        assert 'source_record_ids' in df.columns
+        assert 'record_id' in df.columns
 
     result = dfs[0]
-    for df_to_merge in dfs[1:]:
+    source_record_pairs = source_record_pairings[0]
+    dfs_and_source_record_pairs_to_combine = list(zip(dfs[1:], source_record_pairings[1:]))
+    for index, (df_to_merge, source_record_pairs_to_merge) in enumerate(dfs_and_source_record_pairs_to_combine):
         result = (
             result.merge(df_to_merge, *args, **kwargs)
-                # Get all unique source records that contributed to either record
-                # Need to fill nulls here, because an outer join can cause a composite
-                # record to be created only from rows in one of the dfs
-                .assign(source_record_ids=lambda df: (fillna_empty_tuple(df.source_record_ids_x) + fillna_empty_tuple(df.source_record_ids_y)).apply(set).apply(tuple))
-                .drop(columns=['source_record_ids_x', 'source_record_ids_y'])
         )
+        if index == len(dfs_and_source_record_pairs_to_combine) - 1:
+            # Since this is the last step, these are the record_ids that will actually be returned
+            accumulate_step_record_id_prefix = new_record_id_prefix
+        else:
+            # A dummy intermediate -- this shouldn't be exposed to the user
+            accumulate_step_record_id_prefix = f'merge_iter_{index}'
 
-    return result
+        result = add_unique_record_id(result, accumulate_step_record_id_prefix)
+        source_record_pairs = pd.concat([
+            # The pairs that were already in result
+            source_record_pairs
+                .rename(columns={'record_id': 'record_id_x'})
+                .merge(result[['record_id', 'record_id_x']], on='record_id_x')
+                .drop(columns=['record_id_x']),
+            # The new ones
+            source_record_pairs_to_merge
+                .rename(columns={'record_id': 'record_id_y'})
+                .merge(result[['record_id', 'record_id_y']], on='record_id_y')
+                .drop(columns=['record_id_y']),
+        ])
+        result = result.drop(columns=['record_id_x', 'record_id_y'])
 
-# Weirdly, it is quite hard to fill NaNs in a Series with
-# the literal value of an empty tuple.
-# See https://stackoverflow.com/a/62689667/
-def fillna_empty_tuple(s):
-    return s.fillna({i: tuple() for i in s.index})
+    return result, source_record_pairs
 
-import itertools
-
-def dedupe_preserving_source_records(df, columns_to_dedupe, source_records_col='source_record_ids'):
-    return (
-        # NOTE: If not for dropna=False, we would silently lose
-        # all rows with a null in any of the columns_to_dedupe
-        df.groupby(columns_to_dedupe, dropna=False)
-            # Concatenate all the tuples into one big tuple
-            # https://stackoverflow.com/a/3021851/
-            [source_records_col].apply(lambda x: tuple(set(itertools.chain(*x))))
-            .reset_index()
+def dedupe_preserving_source_records(df, source_record_pairs, columns_to_dedupe, new_record_id_prefix):#, source_records_col='source_record_ids'):
+    result = df[columns_to_dedupe].drop_duplicates()
+    result = add_unique_record_id(result, new_record_id_prefix)
+    df_to_result_mapping = (
+        df[['record_id'] + columns_to_dedupe]
+            .rename(columns={'record_id': 'record_id_pre_dedupe'})
+            .merge(result, on=columns_to_dedupe)
+            [['record_id', 'record_id_pre_dedupe']]
     )
+    result_source_record_pairs = (
+        source_record_pairs
+            .rename(columns={'record_id': 'record_id_pre_dedupe'})
+            .merge(df_to_result_mapping, on='record_id_pre_dedupe')
+            .drop(columns=['record_id_pre_dedupe'])
+    )
+    return result, result_source_record_pairs
+
+def concat_preserving_source_records(dfs, source_record_pairings, new_record_id_prefix):
+    dfs = [df.rename(columns={'record_id': 'record_id_pre_concat'}) for df in dfs]
+    result = pd.concat(dfs, ignore_index=True)
+    result = add_unique_record_id(result, new_record_id_prefix)
+
+    record_id_mapping = (
+        result[['record_id', 'record_id_pre_concat']]
+    )
+    result_source_record_pairs = (
+        pd.concat(source_record_pairings, ignore_index=False)
+            .rename(columns={'record_id': 'record_id_pre_concat'})
+            .merge(record_id_mapping, on='record_id_pre_concat', validate='m:1')
+            .drop(columns=['record_id_pre_concat'])
+    )
+
+    return result.drop(columns=['record_id_pre_concat']), result_source_record_pairs
+    
+psp_kwargs = {
+    'config': custom_configuration,
+    'source': pseudopeople_input_dir,
+}
+if 'modin' in compute_engine:
+    engine_kwargs['engine'] = 'modin'
     
 # %%time
 
-ssa_numident = psp.generate_social_security(year=2029, config=custom_configuration)
+ssa_numident = psp.generate_social_security(
+    year=2029,
+    **psp_kwargs,
+)
 ssa_numident = add_unique_record_id(ssa_numident, 'ssa_numident')
-ssa_numident = record_id_to_single_source_record(ssa_numident)
+ssa_numident_source_record_pairs = record_id_to_single_source_record_pairs(ssa_numident)
 ssa_numident
     
 ssa_numident_ground_truth = ssa_numident.set_index('record_id').simulant_id
@@ -128,10 +271,13 @@ tax_years
 
 # Combine 1040 for all years, adding a tax_year column to track which tax year each row came from.
 taxes_1040 = pd.concat([
-    psp.generate_taxes_1040(year=year, config=custom_configuration).assign(tax_year=year, tax_form='1040') for year in tax_years
+    psp.generate_taxes_1040(
+        year=year,
+        **psp_kwargs,
+    ).assign(tax_year=year, tax_form='1040') for year in tax_years
 ], ignore_index=True)
 taxes_1040 = add_unique_record_id(taxes_1040, '1040')
-taxes_1040 = record_id_to_single_source_record(taxes_1040)
+taxes_1040_source_record_pairs = record_id_to_single_source_record_pairs(taxes_1040)
 taxes_1040
     
 taxes_1040_ground_truth = taxes_1040.set_index('record_id').simulant_id
@@ -141,23 +287,30 @@ taxes_1040 = taxes_1040.drop(columns=['simulant_id'])
 
 # Combine W2/1099 for all years, adding a tax_year column to track which tax year each row came from.
 w2_1099 = pd.concat([
-    psp.generate_taxes_w2_and_1099(year=year, config=custom_configuration).assign(tax_year=year) for year in tax_years
+    psp.generate_taxes_w2_and_1099(
+        year=year,
+        **psp_kwargs,
+    ).assign(tax_year=year) for year in tax_years
 ], ignore_index=True)
 w2_1099 = add_unique_record_id(w2_1099, 'w2_1099')
-w2_1099 = record_id_to_single_source_record(w2_1099)
+w2_1099_source_record_pairs = record_id_to_single_source_record_pairs(w2_1099)
 w2_1099
     
 w2_1099_ground_truth = w2_1099.set_index('record_id').simulant_id
 w2_1099 = w2_1099.drop(columns=['simulant_id'])
     
-taxes = pd.concat([taxes_1040, w2_1099], ignore_index=True)
+taxes, taxes_source_record_pairs = concat_preserving_source_records(
+    [taxes_1040, w2_1099],
+    [taxes_1040_source_record_pairs, w2_1099_source_record_pairs],
+    new_record_id_prefix='taxes',
+)
     
 taxes_ground_truth = pd.concat([taxes_1040_ground_truth, w2_1099_ground_truth])
     
-# "IRS records do not contain DOB, and many of the records contain only the first four letters of the last name."
+# "... many of the [IRS] records contain only the first four letters of the last name."
 # (Brown et al. 2023, p.30, footnote 19)
 # This should be updated in pseudopeople but for now we do it here.
-# Note that the name part only matters for ITIN PIKing since for SSNs that are present in SSA we use name from SSA.
+# Note that this truncation only matters for ITIN PIKing since for SSNs that are present in SSA we use name from SSA.
 PROPORTION_OF_IRS_RECORDS_WITH_TRUNCATION = 0.4 # is this a good guess at "many" in the quote above?
 idx_to_truncate = taxes.sample(frac=PROPORTION_OF_IRS_RECORDS_WITH_TRUNCATION, random_state=1234).index
 taxes.loc[idx_to_truncate, 'last_name'] = taxes.loc[idx_to_truncate, 'last_name'].str[:4]
@@ -165,9 +318,12 @@ taxes.loc[idx_to_truncate, 'last_name']
     
 # %%time
 
-census_2030 = psp.generate_decennial_census(year=2030, config=custom_configuration)
+census_2030 = psp.generate_decennial_census(
+    year=2030,
+    **psp_kwargs,
+)
 census_2030 = add_unique_record_id(census_2030, 'census_2030')
-census_2030 = record_id_to_single_source_record(census_2030)
+census_2030_source_record_pairs = record_id_to_single_source_record_pairs(census_2030)
 census_2030
     
 census_2030_ground_truth = census_2030.set_index('record_id').simulant_id
@@ -192,61 +348,75 @@ def best_data_from_columns(df, columns, best_is_latest=True):
     # (earlier than all values if taking the latest, later than all values if taking the earliest).
     fill_with = 'earliest' if best_is_latest else 'latest'
 
-    return (
+    result = (
         df
             # Without mutating the existing date column, get one that is actually
             # a date type and can be used for sorting.
-            .assign(event_date_for_sort=lambda df: fill_dates(df, fill_with=fill_with))
+            # Note: we actually convert this to an integer for sorting purposes, because Modin was having trouble
+            # sorting by it as an actual datetime
+            .assign(event_date_for_sort=lambda df: fill_dates(df, fill_with=fill_with).astype(np.int64) // 10 ** 9)
             .sort_values('event_date_for_sort')
             .dropna(subset=columns, how='all')
             .drop_duplicates('ssn', keep=('last' if best_is_latest else 'first'))
             [['record_id', 'ssn'] + columns]
-            .pipe(record_id_to_single_source_record)
     )
+    return result, record_id_to_single_source_record_pairs(result)
 
-best_name = best_data_from_columns(
+best_name, best_name_source_record_pairs = best_data_from_columns(
     ssa_numident,
     columns=['first_name', 'middle_name', 'last_name'],
 )
 
-best_date_of_birth = best_data_from_columns(
+best_date_of_birth, best_date_of_birth_source_record_pairs = best_data_from_columns(
     ssa_numident,
     columns=['date_of_birth'],
 )
 
-best_date_of_death = best_data_from_columns(
+best_date_of_death, best_date_of_death_source_record_pairs = best_data_from_columns(
     ssa_numident[ssa_numident.event_type == 'death'],
     columns=['event_date'],
-).rename(columns={'event_date': 'date_of_death'})
-
-census_numident = merge_preserving_source_records(
-    [best_name, best_date_of_birth, best_date_of_death],
-    on='ssn',
-    how='outer',
 )
-census_numident = add_unique_record_id(census_numident, 'census_numident')
+best_date_of_death = best_date_of_death.rename(columns={'event_date': 'date_of_death'})
+
+census_numident, census_numident_source_record_pairs = merge_preserving_source_records(
+    [best_name, best_date_of_birth, best_date_of_death],
+    [best_name_source_record_pairs, best_date_of_birth_source_record_pairs, best_date_of_death_source_record_pairs],
+    new_record_id_prefix='census_numident',
+    on='ssn',
+    how='left',
+)
 census_numident
     
-alternate_name_numident = dedupe_preserving_source_records(ssa_numident, ['ssn', 'first_name', 'middle_name', 'last_name'])
-alternate_name_numident = add_unique_record_id(alternate_name_numident, 'alternate_name_numident')
+alternate_name_numident, alternate_name_numident_source_record_pairs = dedupe_preserving_source_records(
+    ssa_numident,
+    ssa_numident_source_record_pairs,
+    columns_to_dedupe=['ssn', 'first_name', 'middle_name', 'last_name'],
+    new_record_id_prefix='alternate_name_numident',
+)
 alternate_name_numident
     
 alternate_name_numident.groupby('ssn').size().describe()
     
 alternate_name_numident[alternate_name_numident.ssn.duplicated(keep=False)].sort_values('ssn')
     
-alternate_dob_numident = dedupe_preserving_source_records(ssa_numident, ['ssn', 'date_of_birth'])
-alternate_dob_numident = add_unique_record_id(alternate_dob_numident, 'alternate_dob_numident')
+alternate_dob_numident, alternate_dob_numident_source_record_pairs = dedupe_preserving_source_records(
+    ssa_numident,
+    ssa_numident_source_record_pairs,
+    columns_to_dedupe=['ssn', 'date_of_birth'],
+    new_record_id_prefix='alternate_dob_numident',
+)
 alternate_dob_numident
     
 alternate_dob_numident.groupby('ssn').size().describe()
     
 alternate_dob_numident[alternate_dob_numident.ssn.duplicated(keep=False)].sort_values('ssn')
     
-name_dob_numident_records = merge_preserving_source_records(
+name_dob_numident_records, name_dob_numident_records_source_record_pairs = merge_preserving_source_records(
     [alternate_name_numident, alternate_dob_numident],
+    [alternate_name_numident_source_record_pairs, alternate_dob_numident_source_record_pairs],
     on='ssn',
-    how='outer',
+    how='left',
+    new_record_id_prefix='name_dob_numident_records',
 )
 name_dob_numident_records
     
@@ -254,10 +424,15 @@ name_dob_numident_records[name_dob_numident_records.ssn.duplicated(keep=False)].
     
 # Analogous to the process of getting alternate names and dates of birth
 # from SSA, we retain all versions of the name from taxes.
-name_for_itins = dedupe_preserving_source_records(
-    taxes_1040[taxes_1040.ssn.notnull() & taxes_1040.ssn.str.startswith('9')],
-    ['ssn', 'first_name', 'middle_initial', 'last_name'],
+taxes_1040_with_itins = taxes_1040[taxes_1040.ssn.notnull() & taxes_1040.ssn.str.startswith('9')]
+taxes_1040_with_itins_source_record_pairs = taxes_1040_source_record_pairs[taxes_1040_source_record_pairs.record_id.isin(taxes_1040_with_itins.record_id)]
+name_for_itins, name_for_itins_source_record_pairs = dedupe_preserving_source_records(
+    taxes_1040_with_itins,
+    taxes_1040_with_itins_source_record_pairs,
+    columns_to_dedupe=['ssn', 'first_name', 'middle_initial', 'last_name'],
+    new_record_id_prefix='name_for_itins',
 )
+name_for_itins = name_for_itins.rename(columns={'middle_initial': 'middle_name'})
 name_for_itins
     
 name_for_itins.groupby('ssn').size().describe()
@@ -266,11 +441,12 @@ name_for_itins.groupby('ssn').size().describe()
 # if an SSN value in the Numident were corrupted into the ITIN range
 assert set(name_dob_numident_records.ssn) & set(name_for_itins.ssn) == set()
     
-name_dob_reference_file = pd.concat([
-    name_dob_numident_records,
-    name_for_itins,
-], ignore_index=True)
-name_dob_reference_file = add_unique_record_id(name_dob_reference_file, 'name_dob_reference_file')
+name_dob_reference_file, name_dob_reference_file_source_record_pairs = concat_preserving_source_records(
+    [name_dob_numident_records, name_for_itins],
+    [name_dob_numident_records_source_record_pairs, name_for_itins_source_record_pairs],
+    new_record_id_prefix='name_dob_reference_file',
+)
+
 name_dob_reference_file
     
 address_cols = list(taxes.filter(like='mailing_address').columns)
@@ -291,12 +467,17 @@ def standardize_address_part(column):
             .replace('', np.nan)
     )
 
-addresses_by_ssn = dedupe_preserving_source_records(
-    taxes.set_index(['ssn', 'source_record_ids'])
+tax_addresses = (
+    taxes.set_index(['record_id', 'ssn'])
         [address_cols]
         .apply(standardize_address_part)
-        .reset_index(),
-    ['ssn'] + address_cols,
+        .reset_index()
+)
+addresses_by_ssn, addresses_by_ssn_source_record_pairs = dedupe_preserving_source_records(
+    tax_addresses,
+    taxes_source_record_pairs,
+    columns_to_dedupe=['ssn'] + address_cols,
+    new_record_id_prefix='addresses_by_ssn',
 )
 addresses_by_ssn
     
@@ -312,109 +493,106 @@ addresses_by_ssn[addresses_by_ssn.ssn.isin(num_addresses.tail(10).index)].sort_v
     addresses_by_ssn.groupby('ssn').size().mean()
 )
     
-geobase_reference_file = merge_preserving_source_records(
+geobase_reference_file, geobase_reference_file_source_record_pairs = merge_preserving_source_records(
     [name_dob_reference_file, addresses_by_ssn],
+    [name_dob_reference_file_source_record_pairs, addresses_by_ssn_source_record_pairs],
     on='ssn',
     how='left',
+    new_record_id_prefix='geobase_reference_file',
 )
-geobase_reference_file = add_unique_record_id(geobase_reference_file, 'geobase_reference_file')
 geobase_reference_file
     
+# TODO: This is really slow compared to pandas' mode.
+# Mode should be added into Modin as a first-class citizen.
+def mode(s):
+    val_counts = s.value_counts()
+    return val_counts.loc[val_counts == val_counts.max()].reset_index().loc[:, val_counts.index.name].rename(None)
+
 def get_simulants_for_record_ids(record_ids, ground_truth=source_record_ground_truth):
     return tuple(ground_truth.loc[record_id] for record_id in record_ids)
 
-def get_simulants_of_source_records(df, filter_record_ids=None):
-    source_record_ids = df.set_index('record_id').source_record_ids
+def get_simulants_of_source_records(source_record_pairs, filter_record_ids=None, ground_truth=source_record_ground_truth):
     if filter_record_ids is not None:
-        source_record_ids = source_record_ids.apply(lambda r_ids: [r_id for r_id in r_ids if filter_record_ids(r_id)])
-    return source_record_ids.apply(get_simulants_for_record_ids).rename('simulant_ids')
-
-# Working with a tuple column is a bit of a pain -- these helpers are for
-# operations on this column.
-# Oddly, transforming each tuple into a pandas Series (e.g. .apply(pd.Series))
-# and using the pandas equivalents of these functions seems to be orders of magnitude slower.
-
-from statistics import multimode
-
-def nunique(data_tuple):
-    return len(set(data_tuple))
-
-def mode(data_tuple):
-    if len(data_tuple) == 0:
-        return None
-    return multimode(data_tuple)[0]
+        source_record_pairs = source_record_pairs.pipe(filter_record_ids)
+    grouped_simulant_id = lambda: (
+        source_record_pairs
+            .merge(ground_truth.reset_index().rename(columns={'record_id': 'source_record_id'}), on='source_record_id')
+            .groupby('record_id')
+            .simulant_id
+    )
     
-census_numident_simulants = get_simulants_of_source_records(census_numident)
-census_numident_simulants
+    return (
+        # NOTE: You'd expect to be able to just call .agg([mode, 'nunique']) instead of joining.
+        # This is probably slower than that would be, but that doesn't work due to a Modin bug:
+        # https://github.com/modin-project/modin/issues/6600
+        pd.DataFrame(grouped_simulant_id().agg(mode)).merge(pd.DataFrame(grouped_simulant_id().agg('nunique').rename('nunique')), left_index=True, right_index=True)
+    )
     
-census_numident_simulants.apply(nunique).describe()
-    
-census_numident_ground_truth = census_numident_simulants.apply(mode).rename('simulant_id')
+census_numident_ground_truth = get_simulants_of_source_records(census_numident_source_record_pairs)
 census_numident_ground_truth
     
-source_record_simulants = get_simulants_of_source_records(alternate_name_numident)
-    
-source_record_simulants.apply(nunique).describe()
+census_numident_ground_truth['nunique'].describe()
     
 # We take the most common ground truth value.
-# Again, as shown above, there are no SSN collisions.
-alternate_name_numident_ground_truth = source_record_simulants.apply(mode).rename('simulant_id')
+alternate_name_numident_ground_truth = get_simulants_of_source_records(alternate_name_numident_source_record_pairs)
 alternate_name_numident_ground_truth
     
-source_record_simulants = get_simulants_of_source_records(alternate_dob_numident)
+# Again, as shown above, there are no SSN collisions.
+alternate_name_numident_ground_truth['nunique'].describe()
     
-source_record_simulants.apply(nunique).describe()
-    
-alternate_dob_numident_ground_truth = source_record_simulants.apply(mode).rename('simulant_id')
+alternate_dob_numident_ground_truth = get_simulants_of_source_records(alternate_dob_numident_source_record_pairs)
 alternate_dob_numident_ground_truth
     
-source_record_simulants = get_simulants_of_source_records(name_dob_reference_file)
+alternate_dob_numident_ground_truth['nunique'].describe()
     
-source_record_simulants.apply(nunique).describe()
-    
-name_dob_reference_file_ground_truth = source_record_simulants.apply(mode).rename('simulant_id')
+name_dob_reference_file_ground_truth = get_simulants_of_source_records(name_dob_reference_file_source_record_pairs)
 name_dob_reference_file_ground_truth
     
-source_record_simulants = get_simulants_of_source_records(geobase_reference_file)
+name_dob_reference_file_ground_truth['nunique'].describe()
+    
+geobase_reference_file_ground_truth_naive = get_simulants_of_source_records(geobase_reference_file_source_record_pairs)
+geobase_reference_file_ground_truth_naive
     
 # Now there are some collisions, due to "borrowed SSN" noise
-source_record_simulants.apply(nunique).describe()
+geobase_reference_file_ground_truth_naive['nunique'].describe()
     
 # The most collisions on one SSN
-most_collisions = geobase_reference_file.set_index('record_id').loc[source_record_simulants.apply(nunique).sort_values().tail(1).index].reset_index().iloc[0]
-most_collisions
-    
-# Individual tax filings causing those collisions
-taxes[taxes.record_id.isin(most_collisions.source_record_ids)]
+most_collisions_record_id = geobase_reference_file_ground_truth_naive.reset_index().sort_values('nunique', ascending=False).iloc[0].record_id
+most_collisions_source_record_ids = geobase_reference_file_source_record_pairs[geobase_reference_file_source_record_pairs.record_id == most_collisions_record_id].source_record_id
+most_collisions_tax_filings = taxes[taxes.merge(taxes_source_record_pairs, on='record_id').source_record_id.isin(most_collisions_source_record_ids)]
+most_collisions_tax_filings
     
 # Correct value: who actually has the SSN
-ssa_numident[ssa_numident.ssn == most_collisions.ssn]
+ssa_numident[ssa_numident.ssn.isin(most_collisions_tax_filings.ssn.unique())].merge(ssa_numident_ground_truth, on='record_id')
     
-ssa_numident_ground_truth.loc[ssa_numident[ssa_numident.ssn == most_collisions.ssn].record_id]
+# Let's prioritize the use of SSA records
+geobase_reference_file_ground_truth_ssa_only = get_simulants_of_source_records(
+    geobase_reference_file_source_record_pairs,
+    filter_record_ids=lambda df: df[df.source_record_id.str.startswith('ssa_numident_')],
+)
+geobase_reference_file_ground_truth_ssa_only
     
-# We see here that our "mode" approach to ground truth would not be correct --
-# the people borrowing the SSN outnumber the person who actually holds it
-source_record_simulants.apply(mode).loc[most_collisions.record_id]
-    
-# So, let's prioritize the use of SSA records
-source_record_simulants_based_on_ssa_only = get_simulants_of_source_records(geobase_reference_file, filter_record_ids=lambda r_id: 'ssa_numident_' in r_id)
+geobase_reference_file_ground_truth_ssa_only['nunique'].describe()
     
 geobase_reference_file_ground_truth = (
-    source_record_simulants_based_on_ssa_only.apply(mode)
-        # When there are no SSA records (ITIN-based), use the standard mode
-        .fillna(source_record_simulants.apply(mode))
-        .rename('simulant_id')
+    geobase_reference_file_ground_truth_naive.join(geobase_reference_file_ground_truth_ssa_only, lsuffix='_naive', rsuffix='_ssa_only', how='outer')
+        .assign(
+            # When there are no SSA records (ITIN-based), use the standard mode
+            simulant_id=lambda df: df.simulant_id_ssa_only.fillna(df.simulant_id_naive),
+            nunique=lambda df: df.nunique_naive,
+        )
+        [['simulant_id', 'nunique']]
 )
 geobase_reference_file_ground_truth
     
-geobase_reference_file_ground_truth.loc[most_collisions.record_id]
+assert set(geobase_reference_file.record_id) == set(geobase_reference_file_ground_truth.index)
     
 all_ssn_simulant_pairs = pd.concat([
-    census_numident.set_index("record_id")[["ssn"]].join(census_numident_ground_truth),
-    alternate_name_numident.set_index("record_id")[["ssn"]].join(alternate_name_numident_ground_truth),
-    alternate_dob_numident.set_index("record_id")[["ssn"]].join(alternate_dob_numident_ground_truth),
-    name_dob_reference_file.set_index("record_id")[["ssn"]].join(name_dob_reference_file_ground_truth),
-    geobase_reference_file.set_index("record_id")[["ssn"]].join(geobase_reference_file_ground_truth),
+    census_numident.set_index("record_id")[["ssn"]].join(pd.DataFrame(census_numident_ground_truth)),
+    alternate_name_numident.set_index("record_id")[["ssn"]].join(pd.DataFrame(alternate_name_numident_ground_truth)),
+    alternate_dob_numident.set_index("record_id")[["ssn"]].join(pd.DataFrame(alternate_dob_numident_ground_truth)),
+    name_dob_reference_file.set_index("record_id")[["ssn"]].join(pd.DataFrame(name_dob_reference_file_ground_truth)),
+    geobase_reference_file.set_index("record_id")[["ssn"]].join(pd.DataFrame(geobase_reference_file_ground_truth)),
 ])
 all_ssn_simulant_pairs
     
@@ -452,13 +630,21 @@ pik_to_simulant = (
 )
 pik_to_simulant
     
+import os
+import shutil
+from pathlib import Path
+
+def remove_path(path):
+    path = Path(path)
+    if path.is_file():
+        os.remove(path)
+    elif path.exists():
+        shutil.rmtree(path)
+
 for file_name, (file, ground_truth) in files.items():
     # Add a unique record ID -- could do this within the pipeline, but then it's harder to match up the ground truth
     assert file.record_id.is_unique and ground_truth.index.is_unique
     assert set(file.record_id) == set(ground_truth.index)
-
-    # This tuple column is a pain to serialize
-    file = file.drop(columns=['source_record_ids'])
 
     if file_name != 'census_2030':
         file['pik'] = file.ssn.map(ssn_to_pik)
@@ -466,11 +652,25 @@ for file_name, (file, ground_truth) in files.items():
 
     ground_truth = ground_truth.reset_index()
 
-    file.to_parquet(f'output/{file_name}_sample.parquet')
-    ground_truth.to_parquet(f'output/{file_name}_ground_truth_sample.parquet')
+    # HACK: Why does this end up having lots of ints?
+    # This must be an issue in pseudopeople!
+    if 'age' in file.columns:
+        file['age'] = file.age.astype(str)
+
+    file_path = Path(f'{output_dir}/{file_name}_{data_to_use}.parquet')
+    remove_path(file_path)
+    file.to_parquet(file_path)
+
+    ground_truth_path = Path(f'{output_dir}/{file_name}_ground_truth_{data_to_use}.parquet')
+    remove_path(ground_truth_path)
+    ground_truth.to_parquet(ground_truth_path)
     
-pik_to_simulant.reset_index().to_parquet(f'output/pik_to_simulant_ground_truth.parquet')
+pik_to_simulant_path = Path(f'{output_dir}/pik_to_simulant_ground_truth_{data_to_use}.parquet')
+remove_path(pik_to_simulant_path)
+pik_to_simulant.reset_index().to_parquet(pik_to_simulant_path)
     
 # Convert this notebook to a Python script
 # ! cd .. && ./convert_notebook.sh generate_simulated_data/generate_simulated_data_small_sample
+    
+# ! date
     

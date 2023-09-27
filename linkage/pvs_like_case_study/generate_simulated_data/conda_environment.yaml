@@ -1,4 +1,4 @@
-name: pvs_like_case_study
+name: generate_simulated_data
 channels:
   - conda-forge
   - nodefaults
@@ -11,7 +11,8 @@ dependencies:
     - numpy
     - matplotlib
     - pyarrow
-    - splink
-    - jellyfish
+    - pseudopeople
     # Technically not required, if you're not going to use notebooks
     - ipykernel
+    
+      
