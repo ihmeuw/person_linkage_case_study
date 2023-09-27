@@ -81,7 +81,7 @@ elif compute_engine.startswith('modin'):
             from distributed import Client
             cpus_available = int(os.environ['SLURM_CPUS_ON_NODE'])
             client = Client(n_workers=int(cpus_available / 2), threads_per_worker=2)
-        
+
         # Why is this necessary?!
         # For some reason, if I don't set NPartitions, it seems to default to 0?!
         num_row_groups = 334
