@@ -44,7 +44,6 @@ elif compute_engine.startswith('modin'):
         if compute_engine == 'modin_dask_distributed':
             from dask_jobqueue import SLURMCluster
 
-            num_processes_per_job = 1
             cluster = SLURMCluster(
                 queue='long.q',
                 account="proj_simscience",
@@ -84,8 +83,8 @@ elif compute_engine.startswith('modin'):
 
         # Why is this necessary?!
         # For some reason, if I don't set NPartitions, it seems to default to 0?!
-        num_row_groups = 334
-        modin_cfg.NPartitions.put(min(num_jobs * num_processes_per_job * 3, num_row_groups))
+        num_row_groups = 1 if data_to_use == 'small_sample' else 334
+        modin_cfg.NPartitions.put(min(num_jobs * 3, num_row_groups))
 
         display(client)
     elif compute_engine == 'modin_ray':
@@ -249,7 +248,7 @@ psp_kwargs = {
     'source': pseudopeople_input_dir,
 }
 if 'modin' in compute_engine:
-    engine_kwargs['engine'] = 'modin'
+    psp_kwargs['engine'] = 'modin'
     
 # %%time
 
@@ -657,15 +656,15 @@ for file_name, (file, ground_truth) in files.items():
     if 'age' in file.columns:
         file['age'] = file.age.astype(str)
 
-    file_path = Path(f'{output_dir}/{file_name}_{data_to_use}.parquet')
+    file_path = f'{output_dir}/{file_name}_{data_to_use}.parquet'
     remove_path(file_path)
     file.to_parquet(file_path)
 
-    ground_truth_path = Path(f'{output_dir}/{file_name}_ground_truth_{data_to_use}.parquet')
+    ground_truth_path = f'{output_dir}/{file_name}_ground_truth_{data_to_use}.parquet'
     remove_path(ground_truth_path)
     ground_truth.to_parquet(ground_truth_path)
     
-pik_to_simulant_path = Path(f'{output_dir}/pik_to_simulant_ground_truth_{data_to_use}.parquet')
+pik_to_simulant_path = f'{output_dir}/pik_to_simulant_ground_truth_{data_to_use}.parquet'
 remove_path(pik_to_simulant_path)
 pik_to_simulant.reset_index().to_parquet(pik_to_simulant_path)
     
