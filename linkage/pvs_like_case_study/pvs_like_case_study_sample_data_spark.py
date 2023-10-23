@@ -5,7 +5,7 @@
 # Edit with care -- substantive edits should go in the notebook,
 # or they will be overwritten the next time this script is generated.
 
-import re
+import re, os
 import pandas as pd, numpy as np
     
 reference_file = pd.read_parquet('reference_file_sample.parquet')
@@ -83,7 +83,7 @@ from pyspark.sql import SparkSession
 from pyspark.sql import types
 
 conf = SparkConf()
-conf.setMaster("local[2]")
+conf.setMaster(os.getenv("LINKER_SPARK_MASTER_URL", "local[2]"))
 conf.set("spark.driver.memory", "12g")
 conf.set("spark.default.parallelism", "2")
 
@@ -95,7 +95,7 @@ conf.set("spark.jars", path)
 sc = SparkContext.getOrCreate(conf=conf)
 
 spark = SparkSession(sc)
-spark.sparkContext.setCheckpointDir("./tmp_checkpoints")
+spark.sparkContext.setCheckpointDir("./tmpCheckpoints")
 
 from pyspark import SparkContext, SparkConf
 from pyspark.sql import SparkSession
@@ -342,5 +342,5 @@ errors[common_cols].compare(confused_for[common_cols], keep_shape=True, keep_equ
 census_2030.to_parquet('census_2030_with_piks_sample.parquet')
     
 # Convert this notebook to a Python script
-# ! ./convert_notebook.sh pvs_like_case_study_sample_data_spark_local
+# ! ./convert_notebook.sh pvs_like_case_study_sample_data_spark
     
