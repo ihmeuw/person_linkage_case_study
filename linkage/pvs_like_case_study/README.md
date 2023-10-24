@@ -107,7 +107,10 @@ environment described above.
 You should edit CONDA_ENV to either the name of your Spark case study environment, or a minimal
 environment for the nodes as described above.
 
-Look at the Slurm logs of that script to find the Spark master URL and copy it. Then:
+Look at the Slurm logs of that script to find the Spark master URL and copy it --
+the URL should start with `spark://` and there will be a line in the logs that starts
+`Starting Spark master at`.
+Once you have the URL:
 
 ```
 $ mkdir /tmp/pvs_like_case_study_spark_$USER
