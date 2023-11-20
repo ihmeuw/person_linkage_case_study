@@ -4,6 +4,7 @@ channels:
   - nodefaults
 dependencies:
   - python=3.10
+  - graphviz # needed for dask visualizations
   - pip
   # Python packages managed with pip
   - pip:
@@ -11,8 +12,13 @@ dependencies:
     - numpy
     - matplotlib
     - pyarrow
-    - pseudopeople
-    # Technically not required, if you're not going to use notebooks
-    - ipykernel
-    
-      
+    - jupyterlab
+    - papermill
+    - ipywidgets
+    - nbdime
+    - "pseudopeople[modin] @ git+https://github.com/ihmeuw/pseudopeople.git@31db93a230d7ae4ece7ff8259f1662b5f3ae0031"
+    - dask
+    - dask_jobqueue
+    - "bokeh!=3.0.*,>=2.4.2" # needed for dask dashboard
+    - graphviz # needed for dask visualizations
+    - ray
