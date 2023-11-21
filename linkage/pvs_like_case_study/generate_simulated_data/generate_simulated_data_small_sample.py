@@ -485,5 +485,5 @@ for file_name, (file, ground_truth) in files.items():
 pik_to_simulant.reset_index().to_parquet(f'output/pik_to_simulant_ground_truth.parquet')
     
 # Convert this notebook to a Python script
-# ! ../convert_notebook.sh generate_simulated_data_small_sample
+# ! cd .. && ./convert_notebook.sh generate_simulated_data/generate_simulated_data_small_sample
     
