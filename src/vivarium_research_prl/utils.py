@@ -58,3 +58,33 @@ class MappingViaAttributes(collections.abc.Mapping):
 
     def keylist(self):
         return list(self.keys())
+
+def build_full_address(df, prefix=''):
+    """Concatenate address pieces in different columns to get a full address,
+    including city, state, and zipcode.
+    """
+    # Code copied from:
+    # 2023_08_04_check_address_ids_2023_07_28_08_33_09.ipynb
+    address_fields = ['street_number', 'street_name', 'unit_number', 'city', 'state', 'zipcode']
+    address_colname = 'address'
+    if prefix:
+        address_fields = [f'{prefix}_{field}' for field in address_fields]
+        address_colname = f'{prefix}_{address_colname}'
+
+    def ensure_empty_string_in_cats(col):
+        """Add empty string to categories if necessary so that I can replace
+        NaN with '' before concatenation.
+        """
+        if col.dtype == 'category' and col.isna().any() and '' not in col.cat.categories:
+            col = col.cat.add_categories('')
+        return col
+
+    address_cols = [ensure_empty_string_in_cats(df[field]) for field in address_fields]
+    address = address_cols[0].fillna('').astype(str) # Need to ensure '' in categories to avoid an error here
+    for col in address_cols[1:]:
+        col = col.fillna('').astype(str) # Need to ensure '' in categories to avoid an error here
+        # Only add a space in front of nonempty strings to avoid extra spaces between words when a field is missing
+        col.loc[col != ''] = ' ' + col
+        address += col
+    address.rename(address_colname, inplace=True)
+    return address
