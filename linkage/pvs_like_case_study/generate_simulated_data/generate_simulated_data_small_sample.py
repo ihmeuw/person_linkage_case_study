@@ -56,6 +56,7 @@ elif compute_engine.startswith('modin'):
                 # much more trouble than it's worth, since it would require modifying
                 # both pseudopeople and Modin to use them.
                 cores=1,
+                processes=1,
                 memory=memory_per_job,
                 walltime="10-00:00:00",
                 # Dask distributed looks at OS-reported memory to decide whether a worker is running out.
@@ -66,6 +67,7 @@ elif compute_engine.startswith('modin'):
                 # it seems to do okay -- unmanaged memory does seem to shrink from time to time, which it wasn't
                 # previously doing.
                 job_script_prologue="export ARROW_DEFAULT_MEMORY_POOL=system\nexport MALLOC_TRIM_THRESHOLD_=0",
+                job_cpu=20,
             )
 
             cluster.scale(n=num_jobs)
