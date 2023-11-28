@@ -4,14 +4,33 @@ channels:
   - nodefaults
 dependencies:
   - python=3.10
+  # We use a slightly older version of R, because that
+  # is what is compatible with IHME's RStudio
+  - r-base=4.2
+  - r-devtools
+  - r-renv
+  - graphviz # needed for dask visualizations
   - pip
   # Python packages managed with pip
   - pip:
     - pandas
     - numpy
     - matplotlib
+    - "pseudopeople[modin] @ git+https://github.com/ihmeuw/pseudopeople.git@31db93a230d7ae4ece7ff8259f1662b5f3ae0031"
     - pyarrow
     - splink
     - jellyfish
-    # Technically not required, if you're not going to use notebooks
-    - ipykernel
+    - rpy2
+    # Distributed execution
+    - pyspark==3.4.1 # NOTE: I have no idea why, but pyspark 3.5.0 (with the correct version of Spark) would hang forever on the first stage
+    - dask
+    - dask_jobqueue
+    - "bokeh!=3.0.*,>=2.4.2" # needed for dask dashboard
+    - graphviz # needed for dask visualizations
+    - ray
+    # Jupyter stuff
+    - jupyterlab
+    - papermill
+    - ipywidgets
+    - nbdime
+    

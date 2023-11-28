@@ -14,8 +14,6 @@ in its README before continuing.
 
 ## Setup/install
 
-### Base version
-
 To essentially exactly replicate the conda environment that was used when making
 this case study, run
 
@@ -23,16 +21,25 @@ this case study, run
 $ conda create --name pvs_like_case_study --file conda_environment_lock_conda.txt
 $ conda activate pvs_like_case_study
 $ pip install -r conda_environment_lock_pip.txt
+# Before running this, make sure you don't have anything weird in your .libPaths(),
+# e.g. due to a ~/.Rprofile file. The first thing in your libPaths should the R library of the
+# conda environment.
+$ Rscript -e "renv::restore(library=.libPaths(), lockfile='./conda_environment_lock_renv.json')"
 ```
 
 in this directory.
-In rare cases that may not work due to a pulled package version.
+In rare cases that may not work due to a pulled conda package version.
 
 You can *approximately* recreate the environment (e.g. if you want to update
 all dependencies) with:
 
 ```
 $ conda env create -n pvs_like_case_study --file conda_environment.yaml
+$ conda activate pvs_like_case_study
+# Before running this, make sure you don't have anything weird in your .libPaths(),
+# e.g. due to a ~/.Rprofile file. The first thing in your libPaths should the R library of the
+# conda environment.
+$ Rscript conda_environment_R.R
 ```
 
 If you do this, you can re-generate the lock files like so:
@@ -43,59 +50,32 @@ $ conda list --explicit > conda_environment_lock_conda.txt
 # Greps:
 # - exclude python packages installed via conda, which are linked by file
 # - exclude editable packages
-$ pip freeze | grep -v 'file:///' | grep -v '\-e' > conda_environment_lock_pip.txt
+$ pip freeze | grep -v 'file:///' | grep -v ' \-e' > conda_environment_lock_pip.txt
+$ Rscript -e "renv::snapshot(type='all', lockfile='./conda_environment_lock_renv.json')"
 ```
-
-### R version
-
-To exactly replicate the conda environment that was used when making the R version of
-this case study, run
-
-```
-$ conda create -n pvs_like_case_study_r --file=pvs_like_case_study_r_lock.txt
-$ conda activate pvs_like_case_study_r
-$ Rscript -e "renv::restore(library=.libPaths())"
-```
-
-in this directory.
-
-If you'd like to update conda packages, you can *approximately*
-recreate the environment with:
-
-```
-$ conda env create -n pvs_like_case_study_r -f pvs_like_case_study_r_environment.yml
-$ conda activate pvs_like_case_study
-$ Rscript -e "renv::restore(library=.libPaths())"
-```
-
-Updating R packages should be done within the environment, installing them
-and then calling `renv::snapshot(type = "all")`.
 
 ### Spark version
 
 Unfortunately, it isn't possible to install Spark with conda.
 Instead, I have used a Singularity image with Spark, and then activated
-a conda environment inside it.
+the conda environment inside it.
+
+To get the exact version of the Singularity image I used:
+
+```
+$ singularity pull --force spark.sif docker://apache/spark@sha256:a1dd2487a97fb5e35c5a5b409e830b501a92919029c62f9a559b13c4f5c50f63
+```
+
+If you'd like to update the Singularity image:
+
+```
+$ singularity pull --force spark.sif docker://apache/spark:latest
+```
 
 These instructions basically only work on the IHME cluster, because they assume that the
 location of your conda, and the location where it creates new conda environments,
 both are subdirectories of `/mnt`.
-Also, the singularity pull assumes amd64 architecture.
-
-```
-$ conda create -n pvs_like_case_study_spark_local --file=pvs_like_case_study_spark_local_lock_no_jupyter.txt # or if you need jupyter, leave out the no_jupyter
-$ singularity pull spark.sif docker://apache/spark@sha256:a1dd2487a97fb5e35c5a5b409e830b501a92919029c62f9a559b13c4f5c50f63
-```
-
-If you'd like to update the conda packages and Singularity image:
-
-```
-$ conda env create -n pvs_like_case_study_spark_local -f pvs_like_case_study_spark_local_environment.yaml
-$ singularity pull spark.sif docker://apache/spark:latest
-# If you need Jupyter
-$ conda activate pvs_like_case_study_spark_local
-$ conda install jupyterlab
-```
+Also, the exact singularity pull assumes amd64 architecture.
 
 ### (Optional) Spark nodes
 
@@ -115,33 +95,37 @@ in the `pvs_like_case_study` environment created above.
 Or, if you'd like to run it as a Python script:
 
 ```
-$ ./convert_notebook.sh pvs_like_case_study_sample_data # only necessary if you've edited the notebook
+$ ./convert_notebook.sh pvs_like_case_study_sample_data
 $ python pvs_like_case_study_sample_data.py
 ```
 
 ### R version
 
 Run the notebook `pvs_like_case_study_sample_data_r.ipynb`
-in the `pvs_like_case_study_r` environment created above.
+in the `pvs_like_case_study` environment created above.
 
 Or, if you'd like to run it as a Python script:
 
 ```
-$ ./convert_notebook.sh pvs_like_case_study_sample_data_r # only necessary if you've edited the notebook
+$ ./convert_notebook.sh pvs_like_case_study_sample_data_r
 $ python pvs_like_case_study_sample_data_r.py
 ```
 
 ### Local Spark version
 
+Run the notebook `pvs_like_case_study_sample_data.ipynb`,
+with the `splink_engine` set to `spark` and the `spark_master_url` set to `local[2]`,
+in the `pvs_like_case_study` environment created above **inside**
+the Spark container, like so:
+
 ```
 $ mkdir /tmp/pvs_like_case_study_spark_$USER
 # We don't use "singularity shell" because that runs a non-login shell, so conda wouldn't be on the PATH
-$ singularity run -B /mnt:/mnt,/tmp/pvs_like_case_study_spark_$USER:/tmp spark.sif bash -l
-Singularity> conda activate pvs_like_case_study_spark
-(pvs_like_case_study_spark) Singularity> jupyter lab
+$ singularity exec -B /mnt:/mnt,/tmp/pvs_like_case_study_spark_$USER:/tmp spark.sif bash -l
+Singularity> conda activate pvs_like_case_study
+(pvs_like_case_study) Singularity> jupyter lab # to run interactively, or
+(pvs_like_case_study) Singularity> ./convert_notebook.sh pvs_like_case_study_sample_data_spark && python pvs_like_case_study_sample_data_spark.py
 ```
-
-or without Jupyter, replace the last line with `python pvs_like_case_study_sample_data_spark.py`.
 
 ### Distributed Spark version
 
@@ -149,21 +133,26 @@ First, start a Spark cluster. I do this by running `sbatch -A proj_simscience -p
 in this directory **outside of any srun (it will not work otherwise)**.
 You'll need to edit the CONDA_PATH variable in that script to point to the conda you used to create the
 environment described above.
-You should edit CONDA_ENV to either the name of your Spark case study environment, or a minimal
+You should edit CONDA_ENV to either the name of your case study environment, or a minimal
 environment for the nodes as described above.
 
 Look at the Slurm logs of that script to find the Spark master URL and copy it --
 the URL should start with `spark://` and there will be a line in the logs that starts
 `Starting Spark master at`.
-Once you have the URL:
+Edit the `pvs_like_case_study_sample_data.ipynb` notebook to have the
+`splink_engine` set to `spark` and the `spark_master_url` set to the URL you copied.
+Then:
 
 ```
 $ mkdir /tmp/pvs_like_case_study_spark_$USER
 # We don't use "singularity shell" because that runs a non-login shell, so conda wouldn't be on the PATH
 $ singularity run -B /mnt:/mnt,/tmp/pvs_like_case_study_spark_$USER:/tmp spark.sif bash -l
-Singularity> export LINKER_SPARK_MASTER_URL=<your Spark master URL>
-Singularity> conda activate pvs_like_case_study_spark
-(pvs_like_case_study_spark) Singularity> jupyter lab
+Singularity> conda activate pvs_like_case_study
+(pvs_like_case_study) Singularity> jupyter lab # to run interactively, or
+(pvs_like_case_study) Singularity> ./convert_notebook.sh pvs_like_case_study_sample_data && python pvs_like_case_study_sample_data.py
 ```
 
-or without Jupyter, replace the last line with `python pvs_like_case_study_sample_data_spark.py`.
+## Check ground-truth accuracy
+
+The notebook `ground_truth_accuracy.ipynb` uses the ground truth information from pseudopeople
+to inspect some metrics about how accurate the linkage was.
