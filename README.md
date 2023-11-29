@@ -1,7 +1,7 @@
-# PVS-like case study
+# Person linkage case study
 
-This directory contains a case study emulating the Census Bureau's Person Identification
-Validation System.
+This directory contains a case study emulating Census Bureau person linkage methods,
+primarily based on public descriptions of the Person Identification Validation System.
 For more details, see the notebook files themselves.
 
 To run this, the steps are:
@@ -18,8 +18,8 @@ To essentially exactly replicate the conda environment that was used when making
 this case study, run
 
 ```
-$ conda create --name pvs_like_case_study --file conda_environment_lock_conda.txt
-$ conda activate pvs_like_case_study
+$ conda create --name person_linkage_case_study --file conda_environment_lock_conda.txt
+$ conda activate person_linkage_case_study
 $ pip install -r conda_environment_lock_pip.txt
 # Before running this, make sure you don't have anything weird in your .libPaths(),
 # e.g. due to a ~/.Rprofile file. The first thing in your libPaths should the R library of the
@@ -34,8 +34,8 @@ You can *approximately* recreate the environment (e.g. if you want to update
 all dependencies) with:
 
 ```
-$ conda env create -n pvs_like_case_study --file conda_environment.yaml
-$ conda activate pvs_like_case_study
+$ conda env create -n person_linkage_case_study --file conda_environment.yaml
+$ conda activate person_linkage_case_study
 # Before running this, make sure you don't have anything weird in your .libPaths(),
 # e.g. due to a ~/.Rprofile file. The first thing in your libPaths should the R library of the
 # conda environment.
@@ -45,7 +45,7 @@ $ Rscript conda_environment_R.R
 If you do this, you can re-generate the lock files like so:
 
 ```
-$ conda activate pvs_like_case_study
+$ conda activate person_linkage_case_study
 $ conda list --explicit > conda_environment_lock_conda.txt
 # Greps:
 # - exclude python packages installed via conda, which are linked by file
@@ -89,42 +89,42 @@ You can create a separate conda environment for this.
 
 ### Base version
 
-Run the notebook `pvs_like_case_study_sample_data.ipynb`
-in the `pvs_like_case_study` environment created above.
+Run the notebook `person_linkage_case_study_sample_data.ipynb`
+in the `person_linkage_case_study` environment created above.
 
 Or, if you'd like to run it as a Python script:
 
 ```
-$ ./convert_notebook.sh pvs_like_case_study_sample_data
-$ python pvs_like_case_study_sample_data.py
+$ ./convert_notebook.sh person_linkage_case_study_sample_data
+$ python person_linkage_case_study_sample_data.py
 ```
 
 ### R version
 
-Run the notebook `pvs_like_case_study_sample_data_r.ipynb`
-in the `pvs_like_case_study` environment created above.
+Run the notebook `person_linkage_case_study_sample_data_r.ipynb`
+in the `person_linkage_case_study` environment created above.
 
 Or, if you'd like to run it as a Python script:
 
 ```
-$ ./convert_notebook.sh pvs_like_case_study_sample_data_r
-$ python pvs_like_case_study_sample_data_r.py
+$ ./convert_notebook.sh person_linkage_case_study_sample_data_r
+$ python person_linkage_case_study_sample_data_r.py
 ```
 
 ### Local Spark version
 
-Run the notebook `pvs_like_case_study_sample_data.ipynb`,
+Run the notebook `person_linkage_case_study_sample_data.ipynb`,
 with the `splink_engine` set to `spark` and the `spark_master_url` set to `local[2]`,
-in the `pvs_like_case_study` environment created above **inside**
+in the `person_linkage_case_study` environment created above **inside**
 the Spark container, like so:
 
 ```
-$ mkdir /tmp/pvs_like_case_study_spark_$USER
+$ mkdir /tmp/person_linkage_case_study_spark_$USER
 # We don't use "singularity shell" because that runs a non-login shell, so conda wouldn't be on the PATH
-$ singularity exec -B /mnt:/mnt,/tmp/pvs_like_case_study_spark_$USER:/tmp spark.sif bash -l
-Singularity> conda activate pvs_like_case_study
-(pvs_like_case_study) Singularity> jupyter lab # to run interactively, or
-(pvs_like_case_study) Singularity> ./convert_notebook.sh pvs_like_case_study_sample_data_spark && python pvs_like_case_study_sample_data_spark.py
+$ singularity exec -B /mnt:/mnt,/tmp/person_linkage_case_study_spark_$USER:/tmp spark.sif bash -l
+Singularity> conda activate person_linkage_case_study
+(person_linkage_case_study) Singularity> jupyter lab # to run interactively, or
+(person_linkage_case_study) Singularity> ./convert_notebook.sh person_linkage_case_study_sample_data_spark && python person_linkage_case_study_sample_data_spark.py
 ```
 
 ### Distributed Spark version
@@ -139,17 +139,17 @@ environment for the nodes as described above.
 Look at the Slurm logs of that script to find the Spark master URL and copy it --
 the URL should start with `spark://` and there will be a line in the logs that starts
 `Starting Spark master at`.
-Edit the `pvs_like_case_study_sample_data.ipynb` notebook to have the
+Edit the `person_linkage_case_study_sample_data.ipynb` notebook to have the
 `splink_engine` set to `spark` and the `spark_master_url` set to the URL you copied.
 Then:
 
 ```
-$ mkdir /tmp/pvs_like_case_study_spark_$USER
+$ mkdir /tmp/person_linkage_case_study_spark_$USER
 # We don't use "singularity shell" because that runs a non-login shell, so conda wouldn't be on the PATH
-$ singularity run -B /mnt:/mnt,/tmp/pvs_like_case_study_spark_$USER:/tmp spark.sif bash -l
-Singularity> conda activate pvs_like_case_study
-(pvs_like_case_study) Singularity> jupyter lab # to run interactively, or
-(pvs_like_case_study) Singularity> ./convert_notebook.sh pvs_like_case_study_sample_data && python pvs_like_case_study_sample_data.py
+$ singularity run -B /mnt:/mnt,/tmp/person_linkage_case_study_spark_$USER:/tmp spark.sif bash -l
+Singularity> conda activate person_linkage_case_study
+(person_linkage_case_study) Singularity> jupyter lab # to run interactively, or
+(person_linkage_case_study) Singularity> ./convert_notebook.sh person_linkage_case_study_sample_data && python person_linkage_case_study_sample_data.py
 ```
 
 ## Check ground-truth accuracy

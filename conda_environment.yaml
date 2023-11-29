@@ -1,4 +1,4 @@
-name: pvs_like_case_study
+name: person_linkage_case_study
 channels:
   - conda-forge
   - nodefaults
