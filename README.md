@@ -89,59 +89,27 @@ You can create a separate conda environment for this.
 
 ### Base version
 
-Run the notebook `person_linkage_case_study_sample_data.ipynb`
+Run the notebook `person_linkage_case_study.ipynb`
 in the `person_linkage_case_study` environment created above.
+Note that the outputs shouldn't be saved to that notebook file,
+and you should probably run with Papermill.
 
 Or, if you'd like to run it as a Python script:
 
 ```
-$ ./convert_notebook.sh person_linkage_case_study_sample_data
-$ python person_linkage_case_study_sample_data.py
+$ ./convert_notebook.sh person_linkage_case_study
+$ python person_linkage_case_study.py
 ```
 
-### R version
-
-Run the notebook `person_linkage_case_study_sample_data_r.ipynb`
-in the `person_linkage_case_study` environment created above.
-
-Or, if you'd like to run it as a Python script:
+Note that you can change both the Python "compute engine" (Pandas or Dask)
+and the Splink engine (DuckDB, Spark local, Spark distributed over Slurm nodes).
+This can be done by editing the notebook, or by running the notebook directly with Papermill like so:
 
 ```
-$ ./convert_notebook.sh person_linkage_case_study_sample_data_r
-$ python person_linkage_case_study_sample_data_r.py
+$ papermill person_linkage_case_study.ipynb person_linkage_case_study_small_sample_dask_spark_local.ipynb -p compute_engine dask -p splink_engine spark -p spark_local True -k python3
 ```
 
-### Local Spark version
-
-Run the notebook `person_linkage_case_study_sample_data.ipynb`,
-with the `splink_engine` set to `spark` and the `spark_master_url` set to `local[2]`,
-in the `person_linkage_case_study` environment created above **inside**
-the Spark container, like so:
-
-```
-$ mkdir /tmp/person_linkage_case_study_spark_$USER
-# We don't use "singularity shell" because that runs a non-login shell, so conda wouldn't be on the PATH
-$ singularity exec -B /mnt:/mnt,/tmp/person_linkage_case_study_spark_$USER:/tmp spark.sif bash -l
-Singularity> conda activate person_linkage_case_study
-(person_linkage_case_study) Singularity> jupyter lab # to run interactively, or
-(person_linkage_case_study) Singularity> ./convert_notebook.sh person_linkage_case_study_sample_data_spark && python person_linkage_case_study_sample_data_spark.py
-```
-
-### Distributed Spark version
-
-First, start a Spark cluster. I do this by running `sbatch -A proj_simscience -p all.q start_spark_slurm.sh`
-in this directory **outside of any srun (it will not work otherwise)**.
-You'll need to edit the CONDA_PATH variable in that script to point to the conda you used to create the
-environment described above.
-You should edit CONDA_ENV to either the name of your case study environment, or a minimal
-environment for the nodes as described above.
-
-Look at the Slurm logs of that script to find the Spark master URL and copy it --
-the URL should start with `spark://` and there will be a line in the logs that starts
-`Starting Spark master at`.
-Edit the `person_linkage_case_study_sample_data.ipynb` notebook to have the
-`splink_engine` set to `spark` and the `spark_master_url` set to the URL you copied.
-Then:
+**However** if you pass any options that require Spark, the notebook needs to be run inside both the conda environment and the Singularity container:
 
 ```
 $ mkdir /tmp/person_linkage_case_study_spark_$USER
@@ -149,7 +117,19 @@ $ mkdir /tmp/person_linkage_case_study_spark_$USER
 $ singularity run -B /mnt:/mnt,/tmp/person_linkage_case_study_spark_$USER:/tmp spark.sif bash -l
 Singularity> conda activate person_linkage_case_study
 (person_linkage_case_study) Singularity> jupyter lab # to run interactively, or
-(person_linkage_case_study) Singularity> ./convert_notebook.sh person_linkage_case_study_sample_data && python person_linkage_case_study_sample_data.py
+(person_linkage_case_study) Singularity> papermill ... # to run with Papermill
+```
+
+### R version
+
+Run the notebook `person_linkage_case_study_small_sample_r.ipynb`
+in the `person_linkage_case_study` environment created above.
+
+Or, if you'd like to run it as a Python script:
+
+```
+$ ./convert_notebook.sh person_linkage_case_study_small_sample_r
+$ python person_linkage_case_study_small_sample_r.py
 ```
 
 ## Check ground-truth accuracy

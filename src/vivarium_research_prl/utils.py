@@ -1,7 +1,8 @@
 # Use this to see how much memory the dataframes use
 from sys import getsizeof
 import collections
-import re
+import pathlib
+import re, os, shutil
 
 
 def sizemb(obj, mib=False):
@@ -88,3 +89,10 @@ def build_full_address(df, prefix=''):
         address += col
     address.rename(address_colname, inplace=True)
     return address
+
+def remove_path(path):
+    path = pathlib.Path(path)
+    if path.is_file():
+        os.remove(path)
+    elif path.exists():
+        shutil.rmtree(path)

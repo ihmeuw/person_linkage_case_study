@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+
+# See sbatch for details
+ssh $(hostname) -q -t "bash -l -c 'scancel $@'"

@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+
+# Based on https://stackoverflow.com/a/72977484/
+args=()
+for i in "$@"; do
+  # https://stackoverflow.com/a/13210909/
+  args+=("${i//\/tmp\//\/tmp\/pvs_like_case_study_spark_$USER\/}")
+done
+
+# SSH back to the host (var is passed through to singularity anyway).
+ssh $(hostname) -q -t "bash -l -c 'sbatch ${args[@]}'"
