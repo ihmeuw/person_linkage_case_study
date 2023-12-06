@@ -106,6 +106,10 @@ and the Splink engine (DuckDB, Spark local, Spark distributed over Slurm nodes).
 This can be done by editing the notebook, or by running the notebook directly with Papermill like so:
 
 ```
+# Examples saved to this repo
+$ papermill person_linkage_case_study.ipynb person_linkage_case_study_small_sample_pandas_duckdb.ipynb -k python3
+$ papermill person_linkage_case_study.ipynb person_linkage_case_study_small_sample_dask_spark_distributed.ipynb -p compute_engine dask -p splink_engine spark -k python3
+# Others
 $ papermill person_linkage_case_study.ipynb person_linkage_case_study_small_sample_dask_spark_local.ipynb -p compute_engine dask -p splink_engine spark -p spark_local True -k python3
 ```
 
@@ -114,7 +118,8 @@ $ papermill person_linkage_case_study.ipynb person_linkage_case_study_small_samp
 ```
 $ mkdir /tmp/person_linkage_case_study_spark_$USER
 # We don't use "singularity shell" because that runs a non-login shell, so conda wouldn't be on the PATH
-$ singularity run -B /mnt:/mnt,/tmp/person_linkage_case_study_spark_$USER:/tmp spark.sif bash -l
+# TODO: Binding SSH in is probably not good!
+$ singularity run -B /mnt:/mnt,/tmp/person_linkage_case_study_spark_$USER:/tmp,/usr/bin/ssh:/usr/bin/ssh spark.sif bash -l
 Singularity> conda activate person_linkage_case_study
 (person_linkage_case_study) Singularity> jupyter lab # to run interactively, or
 (person_linkage_case_study) Singularity> papermill ... # to run with Papermill

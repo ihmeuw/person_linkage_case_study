@@ -4,7 +4,7 @@
 args=()
 for i in "$@"; do
   # https://stackoverflow.com/a/13210909/
-  args+=("${i//\/tmp\//\/tmp\/pvs_like_case_study_spark_$USER\/}")
+  args+=("${i//\/tmp\//\/tmp\/person_linkage_case_study_spark_$USER\/}")
 done
 
 # SSH back to the host (var is passed through to singularity anyway).
