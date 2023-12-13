@@ -8,4 +8,4 @@ for i in "$@"; do
 done
 
 # SSH back to the host (var is passed through to singularity anyway).
-ssh $(hostname) -q -t "bash -l -c 'sbatch ${args[@]}'"
+ssh $(hostname) -q -t ". /etc/profile && sbatch ${args[@]}"

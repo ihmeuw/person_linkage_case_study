@@ -43,7 +43,7 @@ def start_dask_distributed_over_slurm(
         # Even this doesn't seem to be completely working, but in combination with small-ish partitions
         # it seems to do okay -- unmanaged memory does seem to shrink from time to time, which it wasn't
         # previously doing.
-        job_script_prologue="export ARROW_DEFAULT_MEMORY_POOL=system\nexport MALLOC_TRIM_THRESHOLD_=0",
+        job_script_prologue=["export ARROW_DEFAULT_MEMORY_POOL=system", "export MALLOC_TRIM_THRESHOLD_=0"],
         job_cpu=cpus_per_job,
         # NOTE: This is, as Dask requests, a directory local to the compute node.
         # But IHME's cluster doesn't support this very well -- it can be small-ish,
@@ -54,9 +54,9 @@ def start_dask_distributed_over_slurm(
         # HACK: Avoid nodes with /tmp too full (as of 11/17/2023)
         job_extra_directives=["-x long-slurm-sarchive-p00[53-59]"],
         log_directory=f"/ihme/temp/slurmoutput/{os.environ['USER']}",
+        worker_extra_args=["--lifetime", "'10 days'" if queue == 'long.q' else "'1 day'", "--lifetime-stagger", "20m"],
     )
 
-    cluster.scale(n=num_jobs)
     # Supposedly, this will start new jobs if the existing
     # ones fail for some reason.
     # https://stackoverflow.com/a/61295019

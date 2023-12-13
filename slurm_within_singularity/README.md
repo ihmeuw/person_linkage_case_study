@@ -7,7 +7,7 @@ background on this.
 
 The simplest solution, which I have adopted here, is to use SSH to get *back* to the host whenever we
 need to execute a Slurm command.
-I found out about this approach in [this Gist](https://gist.github.com/willirath/2176a9fa792577b269cb393995f43dd).
+I found out about this approach in [this Gist](https://gist.github.com/willirath/2176a9fa792577b269cb393995f43dda).
 It needed some adapting to better create a login shell, and to account for the binding of /tmp.
 
 When `ssh` is not available, there are more advanced/cool ways to achieve the same thing,
