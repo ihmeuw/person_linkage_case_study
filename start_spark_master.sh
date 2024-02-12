@@ -1,10 +1,6 @@
 #!/bin/bash
 #start_spark_slurm.sh
 
-#SBATCH --cpus-per-task=5
-#SBATCH --mem=8G
-#SBATCH --time=10-00:00:00
-
 # NOTE: This script has a lot in it, and most of it is probably unnecessary.
 # It is a heavily modified version of https://serverfault.com/a/776688
 
