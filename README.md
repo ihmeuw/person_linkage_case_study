@@ -94,13 +94,6 @@ in the `person_linkage_case_study` environment created above.
 Note that the outputs shouldn't be saved to that notebook file,
 and you should probably run with Papermill.
 
-Or, if you'd like to run it as a Python script:
-
-```
-$ ./convert_notebook.sh person_linkage_case_study
-$ python person_linkage_case_study.py
-```
-
 Note that you can change both the Python "compute engine" (Pandas or Dask)
 and the Splink engine (DuckDB, Spark local, Spark distributed over Slurm nodes).
 This can be done by editing the notebook, or by running the notebook directly with Papermill like so:
@@ -129,13 +122,6 @@ Singularity> conda activate person_linkage_case_study
 
 Run the notebook `person_linkage_case_study_small_sample_r.ipynb`
 in the `person_linkage_case_study` environment created above.
-
-Or, if you'd like to run it as a Python script:
-
-```
-$ ./convert_notebook.sh person_linkage_case_study_small_sample_r
-$ python person_linkage_case_study_small_sample_r.py
-```
 
 ## Check ground-truth accuracy
 
