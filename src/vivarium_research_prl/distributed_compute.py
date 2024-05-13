@@ -8,9 +8,19 @@ from . import utils
 def start_dask_distributed_over_slurm(
     num_jobs=3,
     cpus_per_job=2,
+    # If you give dask workers more than one core, they will use it to
+    # run more tasks at once, which can use more memory than is available.
+    # To have more than one thread per worker but use them all for
+    # multi-threading code in one task
+    # at a time, you have to set cores=1, processes=1 and job_cpu > 1.
+    threads_per_job=1,
     memory_per_job="10GB",
     queue='long.q',
     account='proj_simscience',
+    # NOTE: This is, as Dask requests, a directory local to the compute node.
+    # But IHME's cluster doesn't support this very well -- it can be small-ish,
+    # full of stuff from other users, etc.
+    local_directory=f"/tmp/{os.environ['USER']}_dask",
 ):
     import dask
     # Make Dask much less conservative with memory management: don't start spilling
@@ -30,12 +40,7 @@ def start_dask_distributed_over_slurm(
     cluster = SLURMCluster(
         queue=queue,
         account=account,
-        # If you give dask workers more than one core, they will use it to
-        # run more tasks at once, which can use more memory than is available.
-        # To have more than one thread per worker but use them all for
-        # multi-threading code in one task
-        # at a time, you have to set cores=1, processes=1 and job_cpu > 1.
-        cores=1,
+        cores=threads_per_job,
         processes=1,
         memory=memory_per_job,
         walltime="10-00:00:00" if queue == 'long.q' else "1-00:00:00",
@@ -49,10 +54,7 @@ def start_dask_distributed_over_slurm(
         job_script_prologue=["export ARROW_DEFAULT_MEMORY_POOL=system", "export MALLOC_TRIM_THRESHOLD_=0"],
         job_cpu=cpus_per_job,
         job_name=f"dask-worker-{cluster_id}",
-        # NOTE: This is, as Dask requests, a directory local to the compute node.
-        # But IHME's cluster doesn't support this very well -- it can be small-ish,
-        # full of stuff from other users, etc.
-        local_directory=f"/tmp/{os.environ['USER']}_dask",
+        local_directory=local_directory,
         # NOTE: Network file system -- probably slow and doing a lot of unnecessary I/O!
         # local_directory=f"/ihme/scratch/users/{os.environ['USER']}/dask_work_dir/dask_generate_simulated_data",
         log_directory=f"/ihme/temp/slurmoutput/{os.environ['USER']}",
@@ -97,7 +99,7 @@ def start_dask_distributed_over_slurm(
 
     return cluster, client
 
-def start_compute_engine(compute_engine, *args, num_jobs=3, memory_per_job="10GB", num_row_groups=None, **kwargs):
+def start_compute_engine(compute_engine, *args, num_jobs=3, memory_per_job="10GB", threads_per_job=1, num_row_groups=None, **kwargs):
     client = None
     if compute_engine == 'pandas':
         import pandas as pd
@@ -107,16 +109,14 @@ def start_compute_engine(compute_engine, *args, num_jobs=3, memory_per_job="10GB
         # require more memory, but pyarrow string columns have a 2GB max
         # Worked around this using large_strings in pyarrow instead
         # dask.config.set({"dataframe.convert-string": False})
-    
-        cluster, client = start_dask_distributed_over_slurm(*args, num_jobs=num_jobs, memory_per_job=memory_per_job, **kwargs)
-    
+
+        cluster, client = start_dask_distributed_over_slurm(*args, num_jobs=num_jobs, memory_per_job=memory_per_job, threads_per_job=threads_per_job, **kwargs)
+
         import dask.dataframe as pd
-    
+
         display(client)
     elif compute_engine == 'dask_local':
-        from dask.distributed import LocalCluster
-        cluster = LocalCluster(n_workers=num_jobs, memory_limit=memory_per_job)
-        client = cluster.get_client()
+        cluster, client = start_dask_local(*args, num_jobs=num_jobs, memory_per_job=memory_per_job, threads_per_job=threads_per_job, **kwargs)
 
         display(client)
 
@@ -125,9 +125,9 @@ def start_compute_engine(compute_engine, *args, num_jobs=3, memory_per_job="10GB
         if compute_engine.startswith('modin_dask_'):
             import modin.config as modin_cfg
             modin_cfg.Engine.put("dask") # Use dask instead of ray (which is the default)
-    
+
             if compute_engine == 'modin_dask_distributed':
-                cluster, client = start_dask_distributed_over_slurm(*args, num_jobs=num_jobs, memory_per_job=memory_per_job, **kwargs)
+                cluster, client = start_dask_distributed_over_slurm(*args, num_jobs=num_jobs, memory_per_job=memory_per_job, threads_per_job=threads_per_job, **kwargs)
             else:
                 from distributed import Client
                 cpus_available = int(os.environ['SLURM_CPUS_ON_NODE'])
@@ -137,8 +137,10 @@ def start_compute_engine(compute_engine, *args, num_jobs=3, memory_per_job="10GB
                 num_row_groups = 334
             # Why is this necessary?!
             # For some reason, if I don't set NPartitions, it seems to default to 0?!
-            modin_cfg.NPartitions.put(min(num_jobs * 5, num_row_groups))
+            modin_cfg.NPartitions.put(num_row_groups)
             modin_cfg.MinPartitionSize.put(1_000) # ensure no column-axis partitions -- they'll need to be joined up right away anyway by our row-wise noising
+            # I wish this existed!
+            # modin_cfg.MaxPartitionSize.put(3_000_000)
     
             display(client)
         elif compute_engine == 'modin_ray':
@@ -155,8 +157,10 @@ def start_compute_engine(compute_engine, *args, num_jobs=3, memory_per_job="10GB
         # https://modin.readthedocs.io/en/stable/usage_guide/advanced_usage/progress_bar.html
         from modin.config import ProgressBar
         ProgressBar.enable()
+    else:
+        raise ValueError(f'Unknown compute_engine: {compute_engine}')
 
-    return DataFrameOperations(compute_engine, pd, client, num_jobs=num_jobs, memory_per_job=memory_per_job), pd
+    return DataFrameOperations(compute_engine, pd, client, num_jobs=num_jobs, memory_per_job=memory_per_job, threads_per_job=threads_per_job), pd
 
 @dataclass
 class DataFrameOperations:
@@ -165,11 +169,12 @@ class DataFrameOperations:
     client: any
     num_jobs: int
     memory_per_job: str
+    threads_per_job: int
 
     # Helpers for dealing with lazy evaluation -- Dask doesn't actually compute
     # anything until you explicitly tell it to, while Pandas and Modin are eager
     
-    def persist(self, *args, wait=True): # TODO: Put this back to False
+    def persist(self, *args, wait=False):
         if len(args) == 1:
             args = args[0]
         if self.compute_engine.startswith('dask'):
@@ -196,7 +201,7 @@ class DataFrameOperations:
                 return args[0]
             else:
                 return args
-    
+
     def add_unique_id_col(self, df, col_name='unique_id', value_prefix=''):
         if self.compute_engine == 'pandas' or self.compute_engine.startswith('modin'):
             return df.reset_index().rename(columns={'index': col_name}).assign(**{col_name: lambda df: value_prefix + df[col_name].astype(str)})
@@ -204,28 +209,28 @@ class DataFrameOperations:
             # Can use cumsum as in https://stackoverflow.com/a/60852409/ if it needs
             # to be incrementing, but we just need uniqueness    
             df = df.map_partitions(add_id_to_partition, col_name=col_name, value_prefix=value_prefix, compute_engine=self.compute_engine)
-    
+
             return df
         else:
             raise ValueError()
-    
+
     def add_unique_record_id(self, df, dataset_name):
         return self.add_unique_id_col(df, col_name='record_id', value_prefix=f'{dataset_name}_')
-    
+
     # DataFrame operations that need to be done in specific ways for Dask
-    
+
     def drop_duplicates(self, df, subset=None, sort_col=None, keep='last'):
         original_columns = list(df.columns)
-    
+
         if subset is None:
             subset = original_columns.copy()
         elif isinstance(subset, str):
             subset = [subset]
         else:
             subset = list(subset)
-    
+
         sort_lambda = (lambda x: x.sort_values(sort_col)) if sort_col is not None else (lambda x: x)
-    
+
         if self.compute_engine == 'pandas' or self.compute_engine.startswith('modin'):
             return df.pipe(sort_lambda).drop_duplicates(subset=subset, keep=keep)
         elif self.compute_engine.startswith('dask'):
@@ -235,7 +240,7 @@ class DataFrameOperations:
             if df.index.name is not None:
                 index_before = df.index.name
                 df = df.reset_index()
-    
+
             if len(subset) == 1:
                 # Cannot set_index with a column that contains any null values. Any rows that have nulls in any of subset
                 # are by definition not duplicates.
@@ -243,7 +248,7 @@ class DataFrameOperations:
                 deduplicate_by_index_lambda = lambda x: x[~x.index.duplicated(keep=keep)]
                 df = self.concat([
                     df[df[temp_index].isnull()],
-                    df[df[temp_index].notnull()].set_index(temp_index).map_partitions(lambda x: x.pipe(sort_lambda).pipe(deduplicate_by_index_lambda)).reset_index(),
+                    df[df[temp_index].notnull()].set_index(temp_index).map_partitions(lambda x: x.pipe(sort_lambda).pipe(deduplicate_by_index_lambda).pipe(to_pyarrow_large_string)).reset_index(),
                 ], ignore_index=True)
             else:
                 # NOTE: This means it is best to put a high-cardinality column as the first item of subset
@@ -252,7 +257,7 @@ class DataFrameOperations:
                 # are by definition not duplicates.
                 df = self.concat([
                     df[df[temp_index].isnull()],
-                    df[df[temp_index].notnull()].set_index(temp_index).map_partitions(lambda x: x.pipe(sort_lambda).reset_index().drop_duplicates(subset=subset, keep=keep).set_index(temp_index)).reset_index(),
+                    df[df[temp_index].notnull()].set_index(temp_index).map_partitions(lambda x: x.pipe(sort_lambda).reset_index().drop_duplicates(subset=subset, keep=keep).set_index(temp_index).pipe(to_pyarrow_large_string)).reset_index(),
                 ], ignore_index=True)
     
             if index_before is None:
@@ -412,7 +417,7 @@ class DataFrameOperations:
 
         return self.pd.read_parquet(*args, **kwargs).pipe(self.ensure_large_string_capacity).pipe(self._rebalance)
 
-    def to_parquet(self, df, path, *args, wait=True, **kwargs): # TODO: Put wait back to False
+    def to_parquet(self, df, path, *args, wait=False, **kwargs):
         # Dask doesn't overwrite if it is trying to write a directory and there is a file with
         # the same name, even with overwrite=True
         # Pandas won't overwrite if it is trying to write a file and there is a directory with
