@@ -10,27 +10,32 @@ dependencies:
   - r-devtools
   - r-renv
   - graphviz # needed for dask visualizations
+  # for building duckdb
+  - cmake
+  - cxx-compiler
+  - ninja
   - pip
   # Python packages managed with pip
   - pip:
     - pandas
     - numpy
     - matplotlib
-    - "pseudopeople[modin] @ git+https://github.com/ihmeuw/pseudopeople.git@31db93a230d7ae4ece7ff8259f1662b5f3ae0031"
+    - "pseudopeople[dask] @ git+https://github.com/ihmeuw/pseudopeople.git@217800e1002e03a69154819e09c44ed9455df590"
     - pyarrow
     - splink
     - jellyfish
     - rpy2
     # Distributed execution
     - pyspark==3.4.1 # NOTE: I have no idea why, but pyspark 3.5.0 (with the correct version of Spark) would hang forever on the first stage
-    - dask
     - dask_jobqueue
     - "bokeh!=3.0.*,>=2.4.2" # needed for dask dashboard
     - graphviz # needed for dask visualizations
-    - ray
     # Jupyter stuff
     - jupyterlab
     - papermill
     - ipywidgets
     - nbdime
+    # For future experiments
+    - snakemake
+    - "ibis-framework[pandas,dask,duckdb]"
     

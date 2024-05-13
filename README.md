@@ -50,7 +50,7 @@ $ conda list --explicit > conda_environment_lock_conda.txt
 # Greps:
 # - exclude python packages installed via conda, which are linked by file
 # - exclude editable packages
-$ pip freeze | grep -v 'file:///' | grep -v ' \-e' > conda_environment_lock_pip.txt
+$ pip freeze | grep -v 'file:///' | grep -v '\-e ' > conda_environment_lock_pip.txt
 $ Rscript -e "renv::snapshot(type='all', lockfile='./conda_environment_lock_renv.json')"
 ```
 
