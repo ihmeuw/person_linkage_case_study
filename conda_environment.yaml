@@ -37,5 +37,6 @@ dependencies:
     - nbdime
     # For future experiments
     - snakemake
+    - pulp<2.8 # Needed for snakemake, see https://github.com/snakemake/snakemake/issues/2607#issuecomment-1948732242
     - "ibis-framework[pandas,dask,duckdb]"
     

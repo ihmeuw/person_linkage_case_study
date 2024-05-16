@@ -6,11 +6,7 @@ For more details, see the notebook files themselves.
 
 To run this, the steps are:
 1. Create the appropriate conda environment
-2. Run the linking notebook
-
-Note that this assumes you have already generated the input files; if you haven't
-done this, look at the `generate_simulated_data` subdirectory and follow the directions
-in its README before continuing.
+2. Run the pipeline, with [Snakemake](https://snakemake.readthedocs.io/en/stable/) or manually
 
 ## Setup/install
 
@@ -28,7 +24,7 @@ $ Rscript -e "renv::restore(library=.libPaths(), lockfile='./conda_environment_l
 ```
 
 in this directory.
-In rare cases that may not work due to a pulled conda package version.
+In rare cases that may not work due to a yanked conda package version.
 
 You can *approximately* recreate the environment (e.g. if you want to update
 all dependencies) with:
@@ -57,10 +53,17 @@ $ Rscript -e "renv::snapshot(type='all', lockfile='./conda_environment_lock_renv
 ### Spark version
 
 Unfortunately, it isn't possible to install Spark with conda.
-Instead, I have used a Singularity image with Spark, and then activated
-the conda environment inside it.
+Instead, we use a Singularity image.
 
-To get the exact version of the Singularity image I used:
+If you are running on Slurm, you will need to have a "slurm" user in the image,
+and some additional libraries installed, which means the Docker Hub image for Spark
+won't work for you. In this case, build the custom Singularity image in this directory:
+
+```
+$ singularity build --fakeroot spark.sif Singularity
+```
+
+If you don't need Slurm inside the image, you can simply do:
 
 ```
 $ singularity pull --force spark.sif docker://apache/spark@sha256:a1dd2487a97fb5e35c5a5b409e830b501a92919029c62f9a559b13c4f5c50f63
@@ -72,10 +75,9 @@ If you'd like to update the Singularity image:
 $ singularity pull --force spark.sif docker://apache/spark:latest
 ```
 
-These instructions basically only work on the IHME cluster, because they assume that the
-location of your conda, and the location where it creates new conda environments,
-both are subdirectories of `/mnt`.
-Also, the exact singularity pull assumes amd64 architecture.
+and update the SHA in the Singularity file.
+
+The exact singularity pull assumes amd64 architecture.
 
 ### (Optional) Spark nodes
 
@@ -85,7 +87,41 @@ However, for the nodes, all you _need_ is Python, with the same version as you h
 Spark case study environment.
 You can create a separate conda environment for this.
 
-## Run the linking notebook
+## Run the pipeline, with Snakemake
+
+Now, in your conda environment, simply run:
+
+```
+$ snakemake --cores 1
+```
+
+to execute the entire pipeline on the small sample data.
+This should take only a few minutes.
+
+You can configure the data size to run with like so:
+
+```
+$ snakemake --use-conda --use-singularity --cores 1 --config data_to_use=ri ri_simulated_population=/path/to/unzipped/simulated/population
+```
+
+**However, the larger data sizes will automatically use distributed Dask and Spark,
+which currently will only work on a Slurm cluster.**
+This is also why conda and Singularity must be used.
+You need to make sure that Slurm, conda, and a writable temporary directory are bound
+into the Singularity container, with e.g. `--singularity-args "-B /tmp,/opt/slurm/bin"`.
+
+You can also configure Snakemake by creating a `snakemake_config_overrides.yaml` in this directory.
+See `snakemake_config_defaults.yaml` and the notebooks themselves for what can be customized.
+
+## Run the pipeline, manually
+
+First, you will need to generate the input files;
+look at the `generate_simulated_data` subdirectory and follow the directions
+in its README before continuing.
+
+These instructions basically only work on the IHME cluster, because they assume that the
+location of your conda, and the location where it creates new conda environments,
+both are subdirectories of `/mnt`.
 
 ### Base version
 
@@ -99,11 +135,9 @@ and the Splink engine (DuckDB, Spark local, Spark distributed over Slurm nodes).
 This can be done by editing the notebook, or by running the notebook directly with Papermill like so:
 
 ```
-# Examples saved to this repo
 $ papermill person_linkage_case_study.ipynb person_linkage_case_study_small_sample_pandas_duckdb.ipynb -k python3
 $ papermill person_linkage_case_study.ipynb person_linkage_case_study_small_sample_dask_spark_distributed.ipynb -p compute_engine dask -p splink_engine spark -k python3
-# Others
-$ papermill person_linkage_case_study.ipynb person_linkage_case_study_small_sample_dask_spark_local.ipynb -p compute_engine dask -p splink_engine spark -p spark_local True -k python3
+$ papermill person_linkage_case_study.ipynb person_linkage_case_study_ri_dask_spark_local.ipynb -p data_to_use ri -p compute_engine dask -p splink_engine spark -p spark_local True -k python3
 ```
 
 **However** if you pass any options that require Spark, the notebook needs to be run inside both the conda environment and the Singularity container:

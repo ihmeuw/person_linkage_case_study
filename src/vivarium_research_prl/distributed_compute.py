@@ -99,6 +99,33 @@ def start_dask_distributed_over_slurm(
 
     return cluster, client
 
+def start_dask_local(
+    num_jobs=3,
+    threads_per_job=1,
+    memory_per_job="10GB",
+    local_directory=f"/tmp/{os.environ['USER']}_dask",
+    cpus_per_job=1, # Ignored
+    **kwargs,
+):
+    from dask.distributed import LocalCluster
+    import dask
+    # Make Dask less conservative with memory management
+    # dask.config.set({"distributed.worker.memory.target": False})
+    # dask.config.set({"distributed.worker.memory.spill": 0.80})
+    # dask.config.set({"distributed.worker.memory.pause": 0.80})
+    # dask.config.set({"distributed.worker.memory.target": 0.65})
+    # dask.config.set({"distributed.worker.memory.spill": 0.70})
+    # dask.config.set({"distributed.worker.memory.pause": 0.90})
+    dask.config.set({"distributed.worker.memory.terminate": False})
+    dask.config.set({"distributed.comm.retry.count": 5})
+    dask.config.set({"distributed.comm.timeouts.connect": 5 * 60})
+    dask.config.set({"distributed.comm.timeouts.tcp": 5 * 60})
+
+    cluster = LocalCluster(n_workers=num_jobs, memory_limit=memory_per_job, threads_per_worker=threads_per_job, local_directory=local_directory, **kwargs)
+    client = cluster.get_client()
+
+    return cluster, client
+
 def start_compute_engine(compute_engine, *args, num_jobs=3, memory_per_job="10GB", threads_per_job=1, num_row_groups=None, **kwargs):
     client = None
     if compute_engine == 'pandas':
@@ -128,10 +155,10 @@ def start_compute_engine(compute_engine, *args, num_jobs=3, memory_per_job="10GB
 
             if compute_engine == 'modin_dask_distributed':
                 cluster, client = start_dask_distributed_over_slurm(*args, num_jobs=num_jobs, memory_per_job=memory_per_job, threads_per_job=threads_per_job, **kwargs)
+            elif compute_engine == 'modin_dask_local':
+                cluster, client = start_dask_local(*args, num_jobs=num_jobs, memory_per_job=memory_per_job, threads_per_job=threads_per_job, **kwargs)
             else:
-                from distributed import Client
-                cpus_available = int(os.environ['SLURM_CPUS_ON_NODE'])
-                client = Client(n_workers=int(cpus_available / 2), threads_per_worker=2)
+                raise ValueError()
 
             if num_row_groups is None:
                 num_row_groups = 334
@@ -331,20 +358,25 @@ class DataFrameOperations:
             # which doubles the number of partitions.
             # If we don't repartition, this doubling leads to a partition explosion,
             # which scales scheduler overhead and the memory size of the task graph.
-            result = self._rebalance(result)
+            result = self.rebalance(result)
 
         return result
 
-    def _rebalance(self, df):
+    def rebalance(self, df):
+        if not self.compute_engine.startswith('dask'):
+            return df
+
         # Rebalances a dask dataframe to roughly equally-sized partitions that do not
         # exceed 10GB.
-        assert self.compute_engine.startswith('dask')
-        df = self._cull_empty_partitions(self.persist(df))
 
+        df = self.persist(df)
         # https://github.com/dask/dask/blob/91dd42529b9ecd7139926ebadbf56a8f6150991f/dask/dataframe/core.py#L8031
         mem_usages = df.map_partitions(_total_mem_usage, deep=True).compute()
-        too_few = len(mem_usages) < self._optimal_num_partitions() / 5
-        too_many = len(mem_usages) > self._optimal_num_partitions() * 10
+        too_few = len([m for m in mem_usages if m > 0]) < self._optimal_num_partitions() / 5
+        # We like to have smaller partitions if running locally, where shuffle is cheaper and spilling is more common.
+        # Small partitions mean that much more spilling can occur, because more memory is "managed."
+        many_multiplier = 50 if self.compute_engine == 'dask_local' else 10
+        too_many = len([m for m in mem_usages if m > 0]) > self._optimal_num_partitions() * many_multiplier
         too_large = mem_usages.max() > self._max_partition_size()
         if too_few or too_many or too_large:
             print(f'Imbalanced dataframe: {too_few=}, {too_many=}, {too_large=}')
@@ -364,7 +396,7 @@ class DataFrameOperations:
     def _optimal_partition_size(self, total_mem):
         optimal_num_partitions = self._optimal_num_partitions()
 
-        return max(total_mem // optimal_num_partitions, 100 * 1_000 * 1_000) # Don't make smaller than 100MB
+        return min(max(total_mem // optimal_num_partitions, 100 * 1_000 * 1_000), self._max_partition_size()) # Don't make smaller than 100MB
 
     def _optimal_num_partitions(self):
         return self.num_jobs
@@ -381,24 +413,11 @@ class DataFrameOperations:
         else:
             raise ValueError()
 
-        return memory_per_job_b // 4
+        # We like to have smaller partitions if running locally, where shuffle is cheaper and spilling is more common.
+        # Small partitions mean that much more spilling can occur, because more memory is "managed."
+        max_memory_fraction = 20 if self.compute_engine == 'dask_local' else 4
+        return memory_per_job_b // (max_memory_fraction * self.threads_per_job)
 
-    def _cull_empty_partitions(self, df):
-        # https://stackoverflow.com/a/50613803/
-        ll = list(df.map_partitions(len).compute())
-        df_delayed = df.to_delayed()
-        df_delayed_new = list()
-        pempty = None
-        for ix, n in enumerate(ll):
-            if 0 == n:
-                pempty = df.get_partition(ix)
-            else:
-                df_delayed_new.append(df_delayed[ix])
-        if pempty is not None:
-            import dask
-            df = dask.dataframe.from_delayed(df_delayed_new, meta=pempty)
-        return df
-    
     def ensure_large_string_capacity(self, df):
         if not self.compute_engine.startswith('dask'):
             # Not using pyarrow strings by default
@@ -415,7 +434,7 @@ class DataFrameOperations:
             # Pass through
             return self.pd.read_parquet(*args, **kwargs)
 
-        return self.pd.read_parquet(*args, **kwargs).pipe(self.ensure_large_string_capacity).pipe(self._rebalance)
+        return self.pd.read_parquet(*args, **kwargs).pipe(self.ensure_large_string_capacity).pipe(self.rebalance)
 
     def to_parquet(self, df, path, *args, wait=False, **kwargs):
         # Dask doesn't overwrite if it is trying to write a directory and there is a file with

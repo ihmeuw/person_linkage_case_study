@@ -33,3 +33,14 @@ MANIFEST
 __pycache__/
 *.py[cod]
 *$py.class
+
+.virtual_documents
+.cache
+.snakemake
+.ploomber
+.ipython
+slurm-*.out
+
+linkage/person_linkage_case_study/output
+linkage/person_linkage_case_study/snakemake_config_overrides.yaml
+linkage/person_linkage_case_study/**/*.sif

@@ -29,6 +29,7 @@ connection-pool==0.0.3
 contourpy==1.2.1
 cycler==0.12.1
 dask==2024.4.2
+dask-expr==1.0.12
 dask-jobqueue==0.8.5
 datrie==0.8.2
 debuglater==1.4.4
@@ -73,6 +74,7 @@ json5==0.9.25
 jsonpointer==2.4
 jsonschema==4.21.1
 jsonschema-specifications==2023.12.1
+jupyter-events==0.10.0
 jupyter-lsp==2.2.5
 jupyter-server-mathjax==0.2.6
 jupyter_client==7.4.9
@@ -126,6 +128,8 @@ plac==1.4.3
 platformdirs==4.2.1
 ploomber==0.23.2
 ploomber-core==0.2.25
+ploomber-engine==0.0.32
+ploomber-extension==0.1.0
 ploomber-scaffold==0.3.1
 posthog==3.5.0
 prometheus_client==0.20.0
@@ -133,7 +137,8 @@ prompt-toolkit==3.0.43
 pseudopeople @ git+https://github.com/ihmeuw/pseudopeople.git@07b85e8d5235b247443ffca0645efe21dbc134eb
 psutil==5.9.8
 ptyprocess==0.7.0
-PuLP==2.8.0
+PuLP==2.7.0
+pure-eval==0.2.2
 py-cpuinfo==9.0.0
 py4j==0.10.9.7
 pyarrow==15.0.2
