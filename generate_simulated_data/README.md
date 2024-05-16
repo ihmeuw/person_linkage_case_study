@@ -15,12 +15,14 @@ in the case study environment.
 Do **not** run this with JupyterLab or similar.
 It is designed to contain no output, and be run with Papermill.
 You can see example runs saved to `generate_pseudopeople_simulated_datasets_small_sample.ipynb`
-and `generate_pseudopeople_simulated_datasets_full_usa.ipynb`.
+and `generate_pseudopeople_simulated_datasets_usa.ipynb`.
 
 ## Run the data (reference file) generation notebook
 
-Run the notebook `generate_simulated_data_small_sample.ipynb`
+Run the notebook `generate_simulated_data.ipynb`
 in the case study environment.
 
-This notebook is also designed to be run with Papermill *when not using default settings*.
-For the default settings (small sample with Pandas), the outputs are saved directly in the notebook.
+Do **not** run this with JupyterLab or similar.
+It is designed to contain no output, and be run with Papermill.
+You can see example runs saved to `generate_simulated_data_small_sample.ipynb`
+and `generate_simulated_data_usa.ipynb`.

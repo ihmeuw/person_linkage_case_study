@@ -92,7 +92,7 @@ You can create a separate conda environment for this.
 Now, in your conda environment, simply run:
 
 ```
-$ snakemake --cores 1
+$ snakemake
 ```
 
 to execute the entire pipeline on the small sample data.
@@ -101,7 +101,7 @@ This should take only a few minutes.
 You can configure the data size to run with like so:
 
 ```
-$ snakemake --use-conda --use-singularity --cores 1 --config data_to_use=ri ri_simulated_population=/path/to/unzipped/simulated/population
+$ snakemake --config data_to_use=ri ri_simulated_population=/path/to/unzipped/simulated/population
 ```
 
 **However, the larger data sizes will automatically use distributed Dask and Spark,
