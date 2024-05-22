@@ -54,12 +54,12 @@ def dict_to_papermill(d):
 rule generate_pseudopeople_simulated_datasets:
     input:
         "generate_simulated_data/generate_pseudopeople_simulated_datasets.ipynb"
+    log: f'generate_simulated_data/generate_pseudopeople_simulated_datasets_{config["data_to_use"]}{config["custom_run_suffix"]}.ipynb'
     output:
-        [f'generate_simulated_data/generate_pseudopeople_simulated_datasets_{config["data_to_use"]}{config["custom_run_suffix"]}.ipynb'] +
         [output_wrapper(p) for p in pseudopeople_simulated_datasets_paths]
     conda: config["conda_environment_name"]
     shell:
-        f"papermill {{input}} {{output[0]}} {dict_to_papermill(generate_pseudopeople_simulated_datasets_papermill_params)} -k python3"
+        f"papermill {{input}} {{log}} {dict_to_papermill(generate_pseudopeople_simulated_datasets_papermill_params)} -k python3"
 
 generate_case_study_files_papermill_params = {
     'data_to_use': config["data_to_use"],
@@ -92,13 +92,13 @@ rule generate_case_study_files:
     input:
         ["generate_simulated_data/generate_simulated_data.ipynb"] +
         pseudopeople_simulated_datasets_paths
+    log: f'generate_simulated_data/generate_simulated_data_{config["data_to_use"]}{config["custom_run_suffix"]}.ipynb'
     output:
-        [f'generate_simulated_data/generate_simulated_data_{config["data_to_use"]}{config["custom_run_suffix"]}.ipynb'] +
         [output_wrapper(p) for p in case_study_files_paths] +
         [output_wrapper(f'{config["root_output_dir"]}/generate_simulated_data/{config["data_to_use"]}/simulated_pik_simulant_pairs.parquet')]
     conda: config["conda_environment_name"]
     shell:
-        f"papermill {{input[0]}} {{output[0]}} {dict_to_papermill(generate_case_study_files_papermill_params)} -k python3"
+        f"papermill {{input[0]}} {{log}} {dict_to_papermill(generate_case_study_files_papermill_params)} -k python3"
 
 link_datasets_papermill_params = {
     'data_to_use': config["data_to_use"],
@@ -124,11 +124,11 @@ rule link_datasets:
     input:
         ["person_linkage_case_study.ipynb"] +
         [p for p in case_study_files_paths if 'ground_truth' not in p and 'pik_simulant_pairs' not in p]
+    log: f'person_linkage_case_study_{config["data_to_use"]}{config["custom_run_suffix"]}.ipynb'
     output:
-        [f'person_linkage_case_study_{config["data_to_use"]}{config["custom_run_suffix"]}.ipynb'] +
         [output_wrapper(p) for p in linkage_outputs]
     shell:
-        f'{conda_path} run --no-capture-output -n {config["conda_environment_name"]} papermill {{input[0]}} {{output[0]}} {dict_to_papermill(link_datasets_papermill_params)} -k python3'
+        f'{conda_path} run --no-capture-output -n {config["conda_environment_name"]} papermill {{input[0]}} {{log}} {dict_to_papermill(link_datasets_papermill_params)} -k python3'
 
 calculate_ground_truth_papermill_accuracy_params = {
     'data_to_use': config["data_to_use"],
@@ -140,8 +140,7 @@ calculate_ground_truth_papermill_accuracy_params = {
 rule calculate_ground_truth_accuracy:
     input:
         ["ground_truth_accuracy.ipynb"] + case_study_files_paths + linkage_outputs
-    output:
-        f'ground_truth_accuracy_{config["data_to_use"]}{config["custom_run_suffix"]}.ipynb'
+    log: f'ground_truth_accuracy_{config["data_to_use"]}{config["custom_run_suffix"]}.ipynb'
     conda: config["conda_environment_name"]
     shell:
-        f"papermill {{input[0]}} {{output}} {dict_to_papermill(calculate_ground_truth_papermill_accuracy_params)} -k python3"
+        f"papermill {{input[0]}} {{log}} {dict_to_papermill(calculate_ground_truth_papermill_accuracy_params)} -k python3"
