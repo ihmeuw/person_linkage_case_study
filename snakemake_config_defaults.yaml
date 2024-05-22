@@ -49,8 +49,8 @@ papermill_params:
       cpus_per_job: 5
     generate_case_study_files:
       compute_engine: dask
-      num_jobs: 100
-      memory_per_job: 30GB
+      num_jobs: 50
+      memory_per_job: 120GB
       cpus_per_job: 5
     link_datasets:
       compute_engine: dask
