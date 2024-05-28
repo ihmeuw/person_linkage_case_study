@@ -129,12 +129,11 @@ platformdirs==4.2.1
 ploomber==0.23.2
 ploomber-core==0.2.25
 ploomber-engine==0.0.32
-ploomber-extension==0.1.0
 ploomber-scaffold==0.3.1
 posthog==3.5.0
 prometheus_client==0.20.0
 prompt-toolkit==3.0.43
-pseudopeople @ git+https://github.com/ihmeuw/pseudopeople.git@07b85e8d5235b247443ffca0645efe21dbc134eb
+pseudopeople @ git+https://github.com/ihmeuw/pseudopeople.git@b1d872ca68864447e79ef2de5f65c48b6fc477bf
 psutil==5.9.8
 ptyprocess==0.7.0
 PuLP==2.7.0

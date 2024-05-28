@@ -20,7 +20,7 @@ dependencies:
     - pandas
     - numpy
     - matplotlib
-    - "pseudopeople[dask] @ git+https://github.com/ihmeuw/pseudopeople.git@217800e1002e03a69154819e09c44ed9455df590"
+    - "pseudopeople[dask] @ git+https://github.com/ihmeuw/pseudopeople.git@b1d872ca68864447e79ef2de5f65c48b6fc477bf"
     - pyarrow
     - splink
     - jellyfish
