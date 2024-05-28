@@ -105,23 +105,24 @@ def start_dask_local(
     memory_per_job="10GB",
     local_directory=f"/tmp/{os.environ['USER']}_dask",
     cpus_per_job=1, # Ignored
+    queue=None, # Ignored
     **kwargs,
 ):
     from dask.distributed import LocalCluster
     import dask
-    # Make Dask less conservative with memory management
-    # dask.config.set({"distributed.worker.memory.target": False})
-    # dask.config.set({"distributed.worker.memory.spill": 0.80})
-    # dask.config.set({"distributed.worker.memory.pause": 0.80})
-    # dask.config.set({"distributed.worker.memory.target": 0.65})
-    # dask.config.set({"distributed.worker.memory.spill": 0.70})
-    # dask.config.set({"distributed.worker.memory.pause": 0.90})
     dask.config.set({"distributed.worker.memory.terminate": False})
-    dask.config.set({"distributed.comm.retry.count": 5})
+    dask.config.set({"distributed.scheduler.worker-ttl": None})
+    dask.config.set({"distributed.comm.retry.count": 20})
     dask.config.set({"distributed.comm.timeouts.connect": 5 * 60})
     dask.config.set({"distributed.comm.timeouts.tcp": 5 * 60})
 
-    cluster = LocalCluster(n_workers=num_jobs, memory_limit=memory_per_job, threads_per_worker=threads_per_job, local_directory=local_directory, **kwargs)
+    cluster = LocalCluster(
+        n_workers=num_jobs,
+        memory_limit=memory_per_job,
+        threads_per_worker=threads_per_job,
+        local_directory=local_directory,
+        **kwargs,
+    )
     client = cluster.get_client()
 
     return cluster, client
@@ -481,12 +482,6 @@ def add_id_to_partition(df_part, partition_info=None, compute_engine=None, col_n
     )
 
 def add_strings(compute_engine, strings):
-    if not compute_engine.startswith('dask'):
-        result = ''
-        for string in strings:
-            result += string
-        return result
-
     # Add is not defined for large_strings!
     result = ''
     for string in strings:
@@ -495,7 +490,10 @@ def add_strings(compute_engine, strings):
         else:
             result += str(string)
 
-    return result.astype('large_string[pyarrow]')
+    if compute_engine.startswith('dask'):
+        return result.astype('large_string[pyarrow]')
+    else:
+        return result
 
 # https://github.com/dask/dask/blob/91dd42529b9ecd7139926ebadbf56a8f6150991f/dask/dataframe/core.py#L8052-L8056
 def _total_mem_usage(df, index=True, deep=False):
