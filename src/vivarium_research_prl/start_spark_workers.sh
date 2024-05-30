@@ -13,7 +13,7 @@ SPARK_MASTER_PORT=28508
 SPARK_MASTER_WEBUI_PORT=28509
 SPARK_WORKER_WEBUI_PORT=28510
 MASTER_URL=$1
-SPARK_WORKER_MEMORY_OVERHEAD="${2:-5000}"
+LOCAL_DIR=$2
 
 mkdir -p /tmp/singularity_spark_$USER/spark_work
 # cores=1 so it doesn't take on multiple tasks at a time?!
@@ -23,5 +23,5 @@ mkdir -p /tmp/singularity_spark_$USER/spark_work
     "$SPARK_ROOT/bin/spark-class" org.apache.spark.deploy.worker.Worker \
     --cores 1 --memory "$SLURM_MEM_PER_NODE"M \
     --webui-port "$SPARK_WORKER_WEBUI_PORT" \
-    --work-dir /tmp/spark_work \
+    --work-dir $LOCAL_DIR \
     $MASTER_URL

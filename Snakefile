@@ -34,13 +34,22 @@ def get_directory_wrapper_if_necessary(papermill_params):
 def dict_to_papermill(d):
     return ' '.join([f'-p {k} {v}' for k, v in d.items()])
 
+def papermill_params_from_config(config, rule_name):
+    # Cascading specificity
+    return {
+        **config["papermill_params"].get("all", {}).get("all", {}),
+        **config["papermill_params"].get("all", {}).get(rule_name, {}),
+        **config["papermill_params"].get(config["data_to_use"], {}).get("all", {}),
+        **config["papermill_params"].get(config["data_to_use"], {}).get(rule_name, {}),
+    }
+
 ### Generate pseudopeople-simulated datasets ###
 
 generate_pseudopeople_simulated_datasets_papermill_params = {
     'data_to_use': config["data_to_use"],
     'output_dir': f'{config["root_output_dir"]}/generate_simulated_data/',
     'very_noisy': config["data_to_use"] == 'small_sample',
-    **config['papermill_params'][config["data_to_use"]]['generate_pseudopeople_simulated_datasets']
+    **papermill_params_from_config(config, 'generate_pseudopeople_simulated_datasets')
 }
 
 output_wrapper = get_directory_wrapper_if_necessary(generate_pseudopeople_simulated_datasets_papermill_params)
@@ -89,7 +98,7 @@ rule generate_pseudopeople_simulated_datasets:
 generate_case_study_files_papermill_params = {
     'data_to_use': config["data_to_use"],
     'output_dir': f'{config["root_output_dir"]}/generate_simulated_data/',
-    **config['papermill_params'][config["data_to_use"]]['generate_case_study_files']
+    **papermill_params_from_config(config, 'generate_case_study_files')
 }
 
 output_wrapper = get_directory_wrapper_if_necessary(generate_case_study_files_papermill_params)
@@ -130,7 +139,7 @@ link_datasets_papermill_params = {
     'data_to_use': config["data_to_use"],
     'input_dir': f'{config["root_output_dir"]}/generate_simulated_data/',
     'output_dir': f'{config["root_output_dir"]}/results/',
-    **config['papermill_params'][config["data_to_use"]]['link_datasets']
+    **papermill_params_from_config(config, 'link_datasets')
 }
 
 output_wrapper = get_directory_wrapper_if_necessary(link_datasets_papermill_params)
@@ -159,7 +168,7 @@ calculate_ground_truth_accuracy_papermill_params = {
     'data_to_use': config["data_to_use"],
     'simulated_data_output_dir': f'{config["root_output_dir"]}/generate_simulated_data/',
     'case_study_output_dir': f'{config["root_output_dir"]}/results/',
-    **config['papermill_params'][config["data_to_use"]]['calculate_ground_truth_accuracy']
+    **papermill_params_from_config(config, 'calculate_ground_truth_accuracy')
 }
 
 rule calculate_ground_truth_accuracy:

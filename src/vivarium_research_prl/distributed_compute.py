@@ -1,4 +1,8 @@
-import os, time
+import glob
+import os, time, datetime, pathlib, re, atexit
+import asyncio
+import requests
+from typing import Any, Dict, Literal
 import pandas
 from dataclasses import dataclass
 import types
@@ -6,44 +10,37 @@ import uuid
 from . import utils
 
 def start_dask_distributed_over_slurm(
-    num_jobs=3,
-    cpus_per_job=2,
+    num_workers: int,
+    local_directory: str | pathlib.Path,
+    log_directory: str | pathlib.Path = None,
     # If you give dask workers more than one core, they will use it to
     # run more tasks at once, which can use more memory than is available.
     # To have more than one thread per worker but use them all for
     # multi-threading code in one task
     # at a time, you have to set cores=1, processes=1 and job_cpu > 1.
-    threads_per_job=1,
-    memory_per_job="10GB",
-    queue='long.q',
-    account='proj_simscience',
-    # NOTE: This is, as Dask requests, a directory local to the compute node.
-    # But IHME's cluster doesn't support this very well -- it can be small-ish,
-    # full of stuff from other users, etc.
-    local_directory=f"/tmp/{os.environ['USER']}_dask",
+    cpus_per_worker: int = 1,
+    threads_per_worker: int = 1,
+    memory_per_worker: str = "10GB",
+    worker_walltime: str = None,
+    memory_constrained: bool = True,
+    scheduler: Literal["slurm", "htcondor", "lsf", "moab", "oar", "pbs", "sge"] = "slurm",
+    **extra_scheduler_kwargs,
 ):
+    
     import dask
-    # Make Dask much less conservative with memory management: don't start spilling
-    # until over 85%, don't kill until basically at memory limit
-    # (I don't much mind whether Dask or slurm kills a worker)
-    # We want to avoid spilling if at all possible, since it uses a resource
-    # (local disk space) which is unpredictably allocated and running out of
-    # it can cause the whole computation to fail
-    dask.config.set({"distributed.worker.memory.target": False})
-    dask.config.set({"distributed.worker.memory.spill": 0.85})
-    dask.config.set({"distributed.worker.memory.pause": 0.85})
+    # I don't much mind whether Dask or the scheduler kills a worker
     dask.config.set({"distributed.worker.memory.terminate": 0.975})
+    if not memory_constrained:
+        # Make Dask much less conservative with memory management: don't start spilling
+        # until over 85%, don't kill until basically at memory limit
+        # This works well as long as the computation isn't under substantial memory pressure.
+        # If it is, this can cause entire workers to die, which is very expensive
+        # (requires everything that worker was holding to be re-computed).
+        dask.config.set({"distributed.worker.memory.target": False})
+        dask.config.set({"distributed.worker.memory.spill": 0.85})
+        dask.config.set({"distributed.worker.memory.pause": 0.85})
 
-    from dask_jobqueue import SLURMCluster
-
-    cluster_id = uuid.uuid4()
-    cluster = SLURMCluster(
-        queue=queue,
-        account=account,
-        cores=threads_per_job,
-        processes=1,
-        memory=memory_per_job,
-        walltime="10-00:00:00" if queue == 'long.q' else "1-00:00:00",
+        # We'll be cutting it closer with memory usage, so it is important to trim promptly.
         # Dask distributed looks at OS-reported memory to decide whether a worker is running out.
         # If the memory allocator is not returning the memory to the OS promptly (even when holding onto it
         # is smart), it will lead Dask to make bad decisions.
@@ -51,48 +48,132 @@ def start_dask_distributed_over_slurm(
         # Even this doesn't seem to be completely working, but in combination with small-ish partitions
         # it seems to do okay -- unmanaged memory does seem to shrink from time to time, which it wasn't
         # previously doing.
-        job_script_prologue=["export ARROW_DEFAULT_MEMORY_POOL=system", "export MALLOC_TRIM_THRESHOLD_=0"],
-        job_cpu=cpus_per_job,
-        job_name=f"dask-worker-{cluster_id}",
-        local_directory=local_directory,
-        # NOTE: Network file system -- probably slow and doing a lot of unnecessary I/O!
-        # local_directory=f"/ihme/scratch/users/{os.environ['USER']}/dask_work_dir/dask_generate_simulated_data",
-        log_directory=f"/ihme/temp/slurmoutput/{os.environ['USER']}",
-        worker_extra_args=["--lifetime", "'10 days'" if queue == 'long.q' else "'1 day'", "--lifetime-stagger", "20m"],
-    )
+        job_script_prologue = ["export ARROW_DEFAULT_MEMORY_POOL=system", "export MALLOC_TRIM_THRESHOLD_=0"]
+    else:
+        job_script_prologue = None
+
+    import dask_jobqueue
+
+    if worker_walltime is not None:
+        if isinstance(worker_walltime, int):
+            walltime_minutes = worker_walltime
+        elif isinstance(worker_walltime, datetime.timedelta):
+            walltime_minutes = int(worker_walltime.total_seconds() / 60.0)
+        else:
+            # Roughly re-implement Slurm's timedelta format, which is not supported by Dask
+            match = re.match(r"^((((?P<days>\d+)-)?(?P<hours>\d+):)?(?P<minutes>\d+):)?(?P<seconds>\d+)$", worker_walltime)
+            parts = {
+                key: int(match.group(key))
+                for key in ['days', 'hours', 'minutes', 'seconds']
+                if match.group(key) is not None
+            }
+            assert match is not None
+            walltime = datetime.timedelta(**parts)
+            walltime_minutes = int(walltime.total_seconds() / 60.0)
+
+        worker_extra_args = [
+            "--lifetime", f"'{walltime_minutes}m'",
+            "--lifetime-stagger", "20m",
+        ]
+    else:
+        walltime_minutes = None
+        worker_extra_args = None
+
+    cluster_id = uuid.uuid4()
+
+    cluster_args = {
+        'cores': threads_per_worker,
+        'processes': 1,
+        'memory': memory_per_worker,
+        'job_script_prologue': job_script_prologue,
+        'job_name': f"dask-worker-{cluster_id}",
+        'local_directory': local_directory,
+        'log_directory': log_directory,
+        'worker_extra_args': worker_extra_args,
+    }
+
+    # HTCondor does not have a walltime concept
+    if scheduler != 'htcondor':
+        cluster_args['walltime'] = worker_walltime
+
+    # Only the Slurm part of dask_jobqueue supports CPU
+    # allocation
+    if scheduler != 'slurm':
+        assert cpus_per_worker == 1
+
+    # NOTE: All of these besides Slurm are untested!
+    if scheduler == 'slurm':
+        cluster = dask_jobqueue.SLURMCluster(
+            **cluster_args,
+            job_cpu=cpus_per_worker,
+            **extra_scheduler_kwargs,
+        )
+    elif scheduler == 'htcondor':
+        cluster = dask_jobqueue.HTCondorCluster(
+            **cluster_args,
+            **extra_scheduler_kwargs,
+        )
+    elif scheduler == 'lsf':
+        cluster = dask_jobqueue.LSFCluster(
+            **cluster_args,
+            **extra_scheduler_kwargs,
+        )
+    elif scheduler == 'moab':
+        cluster = dask_jobqueue.MoabCluster(
+            **cluster_args,
+            **extra_scheduler_kwargs,
+        )
+    elif scheduler == 'oar':
+        cluster = dask_jobqueue.OARCluster(
+            **cluster_args,
+            **extra_scheduler_kwargs,
+        )
+    elif scheduler == 'pbs':
+        cluster = dask_jobqueue.PBSCluster(
+            **cluster_args,
+            **extra_scheduler_kwargs,
+        )
+    elif scheduler == 'sge':
+        cluster = dask_jobqueue.SGECluster(
+            **cluster_args,
+            **extra_scheduler_kwargs,
+        )
+    else:
+        raise ValueError(f'Unknown scheduler {scheduler}')
 
     # minimum = maximum means that it won't scale up and down for load,
     # but it will start new workers to replace failed ones.
     # We might want to experiment with scaling for load -- will the queueing
-    # overhead make it not worth it?
+    # and data transfer overhead make it not worth it?
     # https://stackoverflow.com/a/61295019
-    cluster.adapt(minimum_jobs=num_jobs, maximum_jobs=num_jobs)
+    cluster.adapt(minimum_jobs=num_workers, maximum_jobs=num_workers)
 
-    # HACK: Only when running inside Singularity, I had an intermittent issue where a couple
-    # workers would fail due to timeout when starting, and then the cluster would never notice
-    # that those workers weren't running.
-    # I do not understand what causes this; it seems like dask_jobqueue should be using squeue
-    # and noticing that those job IDs are in the failed state, but it doesn't do that.
-    # As a workaround, I discovered that changing the cluster's adapt settings seems to do a "reset."
-    # After a few such "jiggles," it will usually succeed in bringing all the desired workers online.
-    # https://github.com/dask/dask-jobqueue/issues/620
-    sleeps_since_jiggle = 0
-    sleep_len = 10
-    num_jobs_changing = num_jobs
+    if scheduler == 'slurm':
+        # HACK: Only when running inside Singularity, I had an intermittent issue where a couple
+        # workers would fail due to timeout when starting, and then the cluster would never notice
+        # that those workers weren't running.
+        # I do not understand what causes this; it seems like dask_jobqueue should be using squeue
+        # and noticing that those job IDs are in the failed state, but it doesn't do that.
+        # As a workaround, I discovered that changing the cluster's adapt settings seems to do a "reset."
+        # After a few such "jiggles," it will usually succeed in bringing all the desired workers online.
+        # https://github.com/dask/dask-jobqueue/issues/620
+        sleeps_since_jiggle = 0
+        sleep_len = 10
+        num_jobs_changing = num_workers
 
-    while len(cluster.scheduler.workers) < num_jobs:
-        num_submitted = int(os.popen(f"squeue --me -o %j | grep dask-worker-{cluster_id} | wc -l").read().strip())
-        # More than three seconds per job is excessive
-        if sleeps_since_jiggle > num_jobs_changing * 3 // sleep_len and num_submitted < num_jobs:
-            print('Jiggling the cluster')
-            cluster.adapt(minimum_jobs=num_submitted, maximum_jobs=num_submitted)
-            time.sleep((num_jobs - num_submitted) * 3)
-            cluster.adapt(minimum_jobs=num_jobs, maximum_jobs=num_jobs)
-            num_jobs_changing = num_jobs - num_submitted
-            sleeps_since_jiggle = 0
+        while len(cluster.scheduler.workers) < num_workers:
+            num_submitted = int(os.popen(f"squeue --me -o %j | grep dask-worker-{cluster_id} | wc -l").read().strip())
+            # More than three seconds per job is excessive
+            if sleeps_since_jiggle > num_jobs_changing * 3 // sleep_len and num_submitted < num_workers:
+                print('Jiggling the cluster')
+                cluster.adapt(minimum_jobs=num_submitted, maximum_jobs=num_submitted)
+                time.sleep((num_workers - num_submitted) * 3)
+                cluster.adapt(minimum_jobs=num_workers, maximum_jobs=num_workers)
+                num_jobs_changing = num_workers - num_submitted
+                sleeps_since_jiggle = 0
 
-        time.sleep(sleep_len)
-        sleeps_since_jiggle += 1
+            time.sleep(sleep_len)
+            sleeps_since_jiggle += 1
 
     from distributed import Client
     client = Client(cluster)
@@ -100,12 +181,10 @@ def start_dask_distributed_over_slurm(
     return cluster, client
 
 def start_dask_local(
-    num_jobs=3,
-    threads_per_job=1,
-    memory_per_job="10GB",
-    local_directory=f"/tmp/{os.environ['USER']}_dask",
-    cpus_per_job=1, # Ignored
-    queue=None, # Ignored
+    num_workers,
+    threads_per_worker,
+    memory_per_worker,
+    local_directory,
     **kwargs,
 ):
     from dask.distributed import LocalCluster
@@ -117,9 +196,9 @@ def start_dask_local(
     dask.config.set({"distributed.comm.timeouts.tcp": 5 * 60})
 
     cluster = LocalCluster(
-        n_workers=num_jobs,
-        memory_limit=memory_per_job,
-        threads_per_worker=threads_per_job,
+        n_workers=num_workers,
+        memory_limit=memory_per_worker,
+        threads_per_worker=threads_per_worker,
         local_directory=local_directory,
         **kwargs,
     )
@@ -127,7 +206,7 @@ def start_dask_local(
 
     return cluster, client
 
-def start_compute_engine(compute_engine, *args, num_jobs=3, memory_per_job="10GB", threads_per_job=1, num_row_groups=None, **kwargs):
+def start_compute_engine(compute_engine, num_workers=3, memory_per_worker="10GB", threads_per_worker=1, num_row_groups=None, **kwargs):
     client = None
     if compute_engine == 'pandas':
         import pandas as pd
@@ -138,26 +217,29 @@ def start_compute_engine(compute_engine, *args, num_jobs=3, memory_per_job="10GB
         # Worked around this using large_strings in pyarrow instead
         # dask.config.set({"dataframe.convert-string": False})
 
-        cluster, client = start_dask_distributed_over_slurm(*args, num_jobs=num_jobs, memory_per_job=memory_per_job, threads_per_job=threads_per_job, **kwargs)
+        cluster, client = start_dask_distributed_over_slurm(num_workers=num_workers, memory_per_worker=memory_per_worker, threads_per_worker=threads_per_worker, **kwargs)
 
         import dask.dataframe as pd
 
         display(client)
     elif compute_engine == 'dask_local':
-        cluster, client = start_dask_local(*args, num_jobs=num_jobs, memory_per_job=memory_per_job, threads_per_job=threads_per_job, **kwargs)
+        cluster, client = start_dask_local(num_workers=num_workers, memory_per_worker=memory_per_worker, threads_per_worker=threads_per_worker, **kwargs)
 
         display(client)
 
         import dask.dataframe as pd
     elif compute_engine.startswith('modin'):
+        # NOTE: This section is mostly here for historical reasons.
+        # Modin does not appear to support complex shuffle operations,
+        # which Dask does.
         if compute_engine.startswith('modin_dask_'):
             import modin.config as modin_cfg
             modin_cfg.Engine.put("dask") # Use dask instead of ray (which is the default)
 
             if compute_engine == 'modin_dask_distributed':
-                cluster, client = start_dask_distributed_over_slurm(*args, num_jobs=num_jobs, memory_per_job=memory_per_job, threads_per_job=threads_per_job, **kwargs)
+                cluster, client = start_dask_distributed_over_slurm(num_workers=num_workers, memory_per_worker=memory_per_worker, threads_per_worker=threads_per_worker, **kwargs)
             elif compute_engine == 'modin_dask_local':
-                cluster, client = start_dask_local(*args, num_jobs=num_jobs, memory_per_job=memory_per_job, threads_per_job=threads_per_job, **kwargs)
+                cluster, client = start_dask_local(num_workers=num_workers, memory_per_worker=memory_per_worker, threads_per_worker=threads_per_worker, **kwargs)
             else:
                 raise ValueError()
 
@@ -188,16 +270,16 @@ def start_compute_engine(compute_engine, *args, num_jobs=3, memory_per_job="10GB
     else:
         raise ValueError(f'Unknown compute_engine: {compute_engine}')
 
-    return DataFrameOperations(compute_engine, pd, client, num_jobs=num_jobs, memory_per_job=memory_per_job, threads_per_job=threads_per_job), pd
+    return DataFrameOperations(compute_engine, pd, client, num_workers=num_workers, memory_per_worker=memory_per_worker, threads_per_worker=threads_per_worker), pd
 
 @dataclass
 class DataFrameOperations:
     compute_engine: str
     pd: types.ModuleType
     client: any
-    num_jobs: int
-    memory_per_job: str
-    threads_per_job: int
+    num_workers: int
+    memory_per_worker: str
+    threads_per_worker: int
 
     # Helpers for dealing with lazy evaluation -- Dask doesn't actually compute
     # anything until you explicitly tell it to, while Pandas and Modin are eager
@@ -368,16 +450,16 @@ class DataFrameOperations:
             return df
 
         # Rebalances a dask dataframe to roughly equally-sized partitions that do not
-        # exceed 10GB.
+        # exceed a threshold.
 
         df = self.persist(df)
         # https://github.com/dask/dask/blob/91dd42529b9ecd7139926ebadbf56a8f6150991f/dask/dataframe/core.py#L8031
         mem_usages = df.map_partitions(_total_mem_usage, deep=True).compute()
-        too_few = len([m for m in mem_usages if m > 0]) < self._optimal_num_partitions() / 5
+        too_few = len([m for m in mem_usages if m > 0]) < self.num_workers / 5
         # We like to have smaller partitions if running locally, where shuffle is cheaper and spilling is more common.
         # Small partitions mean that much more spilling can occur, because more memory is "managed."
         many_multiplier = 50 if self.compute_engine == 'dask_local' else 10
-        too_many = len([m for m in mem_usages if m > 0]) > self._optimal_num_partitions() * many_multiplier
+        too_many = len([m for m in mem_usages if m > 0]) > self.num_workers * many_multiplier
         too_large = mem_usages.max() > self._max_partition_size()
         if too_few or too_many or too_large:
             print(f'Imbalanced dataframe: {too_few=}, {too_many=}, {too_large=}')
@@ -395,29 +477,24 @@ class DataFrameOperations:
             return df
 
     def _optimal_partition_size(self, total_mem):
-        optimal_num_partitions = self._optimal_num_partitions()
-
-        return min(max(total_mem // optimal_num_partitions, 100 * 1_000 * 1_000), self._max_partition_size()) # Don't make smaller than 100MB
-
-    def _optimal_num_partitions(self):
-        return self.num_jobs
+        return min(max(total_mem // self.num_workers, 100 * 1_000 * 1_000), self._max_partition_size()) # Don't make smaller than 100MB
 
     def _max_partition_size(self):
         # Too large makes shuffling impossible, in addition to causing other problems like lots of
         # unmanaged memory.
-        if self.memory_per_job.endswith('GB'):
-            memory_per_job_b = int(self.memory_per_job.replace('GB', '')) * 1_000 * 1_000 * 1_000
-        elif self.memory_per_job.endswith('MB'):
-            memory_per_job_b = int(self.memory_per_job.replace('MB', '')) * 1_000 * 1_000
-        elif self.memory_per_job.endswith('KB'):
-            memory_per_job_b = int(self.memory_per_job.replace('KB', '')) * 1_000
+        if self.memory_per_worker.endswith('GB'):
+            memory_per_worker_b = int(self.memory_per_worker.replace('GB', '')) * 1_000 * 1_000 * 1_000
+        elif self.memory_per_worker.endswith('MB'):
+            memory_per_worker_b = int(self.memory_per_worker.replace('MB', '')) * 1_000 * 1_000
+        elif self.memory_per_worker.endswith('KB'):
+            memory_per_worker_b = int(self.memory_per_worker.replace('KB', '')) * 1_000
         else:
             raise ValueError()
 
         # We like to have smaller partitions if running locally, where shuffle is cheaper and spilling is more common.
         # Small partitions mean that much more spilling can occur, because more memory is "managed."
         max_memory_fraction = 20 if self.compute_engine == 'dask_local' else 4
-        return memory_per_job_b // (max_memory_fraction * self.threads_per_job)
+        return memory_per_worker_b // (max_memory_fraction * self.threads_per_worker)
 
     def ensure_large_string_capacity(self, df):
         if not self.compute_engine.startswith('dask'):
@@ -443,11 +520,11 @@ class DataFrameOperations:
         # Pandas won't overwrite if it is trying to write a file and there is a directory with
         # the same name
         utils.remove_path(path)
-        r = df.to_parquet(path, *args, **kwargs)
+        result = df.to_parquet(path, *args, **kwargs)
 
         if wait and self.compute_engine.startswith('dask'):
             import distributed
-            distributed.wait(r)
+            distributed.wait(result)
 
     def empty_dataframe(self, columns, dtype=None):
         dict = {col: [] for col in columns}
@@ -550,8 +627,6 @@ def to_pyarrow_large_string(df):
         dtypes = {
             col: string_dtype for col, dtype in df.dtypes.items() if is_pyarrow_string_dtype(dtype)
         }
-    elif dtype_check(df.dtype):
-        dtypes = string_dtype
 
     if dtypes:
         df = df.astype(dtypes, copy=False)
@@ -571,3 +646,158 @@ def to_pyarrow_large_string(df):
         else:
             df.index = df.index.astype(string_dtype)
     return df
+
+def start_spark_cluster(
+    local: bool,
+    cpus_master: int,
+    memory_master: int,
+    num_workers: int,
+    checkpoint_directory: str | pathlib.Path,
+    local_directory: str | pathlib.Path = "/tmp/spark",
+    master_walltime: str = None,
+    cpus_per_worker: int = 1,
+    worker_walltime: str = None,
+    memory_per_worker: str = "10GB",
+    worker_memory_overhead_mb: int = 500,
+    log_directory: str | pathlib.Path = None,
+    scheduler: Literal["slurm", "htcondor", "lsf", "moab", "oar", "pbs", "sge"] = "slurm",
+    **extra_scheduler_kwargs,
+):
+    if local:
+        return f"local[{num_workers}]"
+    
+    memory_master = _convert_to_mb(memory_master)
+    memory_per_worker = _convert_to_mb(memory_per_worker)
+
+    assert scheduler == "slurm", "Distributed Spark can currently only be run on Slurm"
+    assert master_walltime is not None and worker_walltime is not None
+
+    if log_directory is None:
+        log_directory = os.getcwd()
+
+    log_path = f"{log_directory}/spark-master-%j.out"
+    sbatch_log_part = f"--output {log_path} --error {log_path}"
+    array_job_log_path = f"{log_directory}/spark-worker-%A_%a.out"
+    array_job_sbatch_log_part = f"--output {array_job_log_path} --error {array_job_log_path}"
+
+    extra_kwargs_part = ' '.join([f"--{k} '{v}'" for k, v in extra_scheduler_kwargs.items()])        
+
+    code_dir = os.path.abspath(os.path.dirname(__file__))
+
+    print("Starting Spark master")
+    spark_start_master_output = os.popen(
+        f"sbatch {sbatch_log_part} "
+        f"--cpus-per-task {cpus_master} --mem {memory_master} "
+        f"--time {master_walltime} {extra_kwargs_part} {code_dir}/start_spark_master.sh"
+    ).read()
+    spark_master_job_id = re.match('Submitted batch job (\d+)', spark_start_master_output)[1]
+
+    while True:
+        try:
+            with open(log_path.replace('%j', spark_master_job_id),'r') as file:
+                logs = file.read()
+            
+            starting_lines = [l for l in logs.split('\n') if 'Starting Spark master at' in l]
+            webui_starting_lines = [l for l in logs.split('\n') if 'Bound MasterWebUI to' in l]
+            if len(starting_lines) > 0 and len(webui_starting_lines) > 0:
+                break
+        except FileNotFoundError:
+            pass
+    
+        time.sleep(5)        
+
+    spark_master_url = re.match('.*Starting Spark master at (spark:.+)$', starting_lines[0])[1]
+    spark_master_webui_url = re.match('.*Bound MasterWebUI to .*, and started at (http:.+)$', webui_starting_lines[0])[1]
+    print(f'Got Spark master URL: {spark_master_url}')
+    print(f'WebUI running at: {spark_master_webui_url}')
+
+    spark_worker_job_ids = []
+
+    def start_spark_workers(n_workers):
+        spark_start_workers_output = os.popen(
+            f"sbatch {array_job_sbatch_log_part} "
+            f"--array=1-{n_workers} --cpus-per-task {cpus_per_worker} --mem {memory_per_worker + worker_memory_overhead_mb} "
+            f"--time {worker_walltime} {extra_kwargs_part} {code_dir}/start_spark_workers.sh {spark_master_url} {local_directory}"
+        ).read()
+        job_id = re.match('Submitted batch job (\d+)', spark_start_workers_output)[1]
+        spark_worker_job_ids.append(job_id)
+
+        while True:
+            logs = ''
+            for p in glob.glob(array_job_log_path.replace('%A', job_id).replace('%a', '*')):
+                try:
+                    with open(p,'r') as file:
+                        logs += file.read()
+                except FileNotFoundError:
+                    continue
+            
+            starting_lines = [l for l in logs.split('\n') if 'Starting Spark worker' in l]
+            if len(starting_lines) == n_workers:
+                print('\n'.join([l for l in logs.split('\n') if 'Starting Spark worker' in l or 'Bound WorkerWebUI' in l]))
+                break
+            
+            time.sleep(5)
+
+    print('Starting Spark workers')
+    start_spark_workers(num_workers)
+
+    def maintain_spark_worker_count():
+        while True:
+            alive_workers = requests.get(f'{spark_master_webui_url}/json/').json()['aliveworkers']
+            if alive_workers < num_workers:
+                num_to_start = num_workers - alive_workers
+                print(f"Starting {num_to_start} more Spark worker(s)")
+                start_spark_workers(num_to_start)
+            time.sleep(20)
+
+
+    maintain_task = asyncio.get_event_loop().run_in_executor(None, maintain_spark_worker_count)
+
+    def teardown():
+        maintain_task.cancel()
+
+        for job_id in spark_worker_job_ids:
+            os.popen(f"scancel {job_id}").read()
+
+        os.popen(f"scancel {spark_master_job_id}").read()
+
+    # TODO: This cleanup doesn't seem to always work
+    atexit.register(teardown)
+
+    # https://moj-analytical-services.github.io/splink/demos/examples/spark/deduplicate_1k_synthetic.html
+    from splink.spark.jar_location import similarity_jar_location
+
+    from pyspark import SparkContext, SparkConf
+    from pyspark.sql import SparkSession
+    from pyspark.sql import types
+
+    conf = SparkConf()
+    conf.setMaster(spark_master_url)
+    conf.set("spark.driver.memory", f"{max(memory_master - 1_000, 5_000)}m")
+    conf.set("spark.executor.instances", num_workers)
+    conf.set("spark.executor.cores", 1)
+    conf.set("spark.executor.memory", f"{memory_per_worker}m")
+
+    conf.set("spark.sql.shuffle.partitions", num_workers * 5)
+    conf.set("spark.default.parallelism", num_workers * 5)
+
+    # Add custom similarity functions, which are bundled with Splink
+    # documented here: https://github.com/moj-analytical-services/splink_scalaudfs
+    path = similarity_jar_location()
+    conf.set("spark.jars", path)
+
+    sc = SparkContext.getOrCreate(conf=conf)
+
+    spark = SparkSession(sc)
+    spark.sparkContext.setCheckpointDir(checkpoint_directory)
+
+    return spark, teardown
+
+def _convert_to_mb(memory_string):
+    if memory_string.endswith('G') or memory_string.endswith('GB'):
+        memory_string = int(re.search(r'(\d+)GB?', memory_string).group(1)) * 1_000
+    elif memory_string.endswith('M') or memory_string.endswith('MB'):
+        memory_string = int(re.search(r'(\d+)MB?', memory_string).group(1))
+    else:
+        raise ValueError()
+    return memory_string

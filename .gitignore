@@ -41,6 +41,6 @@ __pycache__/
 .ipython
 slurm-*.out
 
-linkage/person_linkage_case_study/output
+output/
 linkage/person_linkage_case_study/snakemake_config_overrides.yaml
 linkage/person_linkage_case_study/**/*.sif
