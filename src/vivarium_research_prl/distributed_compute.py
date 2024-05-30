@@ -663,106 +663,107 @@ def start_spark_cluster(
     scheduler: Literal["slurm", "htcondor", "lsf", "moab", "oar", "pbs", "sge"] = "slurm",
     **extra_scheduler_kwargs,
 ):
-    if local:
-        return f"local[{num_workers}]"
-    
     memory_master = _convert_to_mb(memory_master)
     memory_per_worker = _convert_to_mb(memory_per_worker)
 
-    assert scheduler == "slurm", "Distributed Spark can currently only be run on Slurm"
-    assert master_walltime is not None and worker_walltime is not None
+    if local:
+        spark_master_url = f"local[{num_workers}]"
+        teardown = lambda: None
+    else:
+        assert scheduler == "slurm", "Distributed Spark can currently only be run on Slurm"
+        assert master_walltime is not None and worker_walltime is not None
 
-    if log_directory is None:
-        log_directory = os.getcwd()
+        if log_directory is None:
+            log_directory = os.getcwd()
 
-    log_path = f"{log_directory}/spark-master-%j.out"
-    sbatch_log_part = f"--output {log_path} --error {log_path}"
-    array_job_log_path = f"{log_directory}/spark-worker-%A_%a.out"
-    array_job_sbatch_log_part = f"--output {array_job_log_path} --error {array_job_log_path}"
+        log_path = f"{log_directory}/spark-master-%j.out"
+        sbatch_log_part = f"--output {log_path} --error {log_path}"
+        array_job_log_path = f"{log_directory}/spark-worker-%A_%a.out"
+        array_job_sbatch_log_part = f"--output {array_job_log_path} --error {array_job_log_path}"
 
-    extra_kwargs_part = ' '.join([f"--{k} '{v}'" for k, v in extra_scheduler_kwargs.items()])        
+        extra_kwargs_part = ' '.join([f"--{k} '{v}'" for k, v in extra_scheduler_kwargs.items()])        
 
-    code_dir = os.path.abspath(os.path.dirname(__file__))
+        code_dir = os.path.abspath(os.path.dirname(__file__))
 
-    print("Starting Spark master")
-    spark_start_master_output = os.popen(
-        f"sbatch {sbatch_log_part} "
-        f"--cpus-per-task {cpus_master} --mem {memory_master} "
-        f"--time {master_walltime} {extra_kwargs_part} {code_dir}/start_spark_master.sh"
-    ).read()
-    spark_master_job_id = re.match('Submitted batch job (\d+)', spark_start_master_output)[1]
-
-    while True:
-        try:
-            with open(log_path.replace('%j', spark_master_job_id),'r') as file:
-                logs = file.read()
-            
-            starting_lines = [l for l in logs.split('\n') if 'Starting Spark master at' in l]
-            webui_starting_lines = [l for l in logs.split('\n') if 'Bound MasterWebUI to' in l]
-            if len(starting_lines) > 0 and len(webui_starting_lines) > 0:
-                break
-        except FileNotFoundError:
-            pass
-    
-        time.sleep(5)        
-
-    spark_master_url = re.match('.*Starting Spark master at (spark:.+)$', starting_lines[0])[1]
-    spark_master_webui_url = re.match('.*Bound MasterWebUI to .*, and started at (http:.+)$', webui_starting_lines[0])[1]
-    print(f'Got Spark master URL: {spark_master_url}')
-    print(f'WebUI running at: {spark_master_webui_url}')
-
-    spark_worker_job_ids = []
-
-    def start_spark_workers(n_workers):
-        spark_start_workers_output = os.popen(
-            f"sbatch {array_job_sbatch_log_part} "
-            f"--array=1-{n_workers} --cpus-per-task {cpus_per_worker} --mem {memory_per_worker + worker_memory_overhead_mb} "
-            f"--time {worker_walltime} {extra_kwargs_part} {code_dir}/start_spark_workers.sh {spark_master_url} {local_directory}"
+        print("Starting Spark master")
+        spark_start_master_output = os.popen(
+            f"sbatch {sbatch_log_part} "
+            f"--cpus-per-task {cpus_master} --mem {memory_master} "
+            f"--time {master_walltime} {extra_kwargs_part} {code_dir}/start_spark_master.sh"
         ).read()
-        job_id = re.match('Submitted batch job (\d+)', spark_start_workers_output)[1]
-        spark_worker_job_ids.append(job_id)
+        spark_master_job_id = re.match('Submitted batch job (\d+)', spark_start_master_output)[1]
 
         while True:
-            logs = ''
-            for p in glob.glob(array_job_log_path.replace('%A', job_id).replace('%a', '*')):
-                try:
-                    with open(p,'r') as file:
-                        logs += file.read()
-                except FileNotFoundError:
-                    continue
-            
-            starting_lines = [l for l in logs.split('\n') if 'Starting Spark worker' in l]
-            if len(starting_lines) == n_workers:
-                print('\n'.join([l for l in logs.split('\n') if 'Starting Spark worker' in l or 'Bound WorkerWebUI' in l]))
-                break
-            
-            time.sleep(5)
+            try:
+                with open(log_path.replace('%j', spark_master_job_id),'r') as file:
+                    logs = file.read()
+                
+                starting_lines = [l for l in logs.split('\n') if 'Starting Spark master at' in l]
+                webui_starting_lines = [l for l in logs.split('\n') if 'Bound MasterWebUI to' in l]
+                if len(starting_lines) > 0 and len(webui_starting_lines) > 0:
+                    break
+            except FileNotFoundError:
+                pass
+        
+            time.sleep(5)        
 
-    print('Starting Spark workers')
-    start_spark_workers(num_workers)
+        spark_master_url = re.match('.*Starting Spark master at (spark:.+)$', starting_lines[0])[1]
+        spark_master_webui_url = re.match('.*Bound MasterWebUI to .*, and started at (http:.+)$', webui_starting_lines[0])[1]
+        print(f'Got Spark master URL: {spark_master_url}')
+        print(f'WebUI running at: {spark_master_webui_url}')
 
-    def maintain_spark_worker_count():
-        while True:
-            alive_workers = requests.get(f'{spark_master_webui_url}/json/').json()['aliveworkers']
-            if alive_workers < num_workers:
-                num_to_start = num_workers - alive_workers
-                print(f"Starting {num_to_start} more Spark worker(s)")
-                start_spark_workers(num_to_start)
-            time.sleep(20)
+        spark_worker_job_ids = []
+
+        def start_spark_workers(n_workers):
+            spark_start_workers_output = os.popen(
+                f"sbatch {array_job_sbatch_log_part} "
+                f"--array=1-{n_workers} --cpus-per-task {cpus_per_worker} --mem {memory_per_worker + worker_memory_overhead_mb} "
+                f"--time {worker_walltime} {extra_kwargs_part} {code_dir}/start_spark_workers.sh {spark_master_url} {local_directory}"
+            ).read()
+            job_id = re.match('Submitted batch job (\d+)', spark_start_workers_output)[1]
+            spark_worker_job_ids.append(job_id)
+
+            while True:
+                logs = ''
+                for p in glob.glob(array_job_log_path.replace('%A', job_id).replace('%a', '*')):
+                    try:
+                        with open(p,'r') as file:
+                            logs += file.read()
+                    except FileNotFoundError:
+                        continue
+                
+                starting_lines = [l for l in logs.split('\n') if 'Starting Spark worker' in l]
+                if len(starting_lines) == n_workers:
+                    print('\n'.join([l for l in logs.split('\n') if 'Starting Spark worker' in l or 'Bound WorkerWebUI' in l]))
+                    break
+                
+                time.sleep(5)
+
+        print('Starting Spark workers')
+        start_spark_workers(num_workers)
+
+        def maintain_spark_worker_count():
+            while True:
+                alive_workers = requests.get(f'{spark_master_webui_url}/json/').json()['aliveworkers']
+                if alive_workers < num_workers:
+                    num_to_start = num_workers - alive_workers
+                    print(f"Starting {num_to_start} more Spark worker(s)")
+                    start_spark_workers(num_to_start)
+                time.sleep(20)
 
 
-    maintain_task = asyncio.get_event_loop().run_in_executor(None, maintain_spark_worker_count)
+        maintain_task = asyncio.get_event_loop().run_in_executor(None, maintain_spark_worker_count)
 
-    def teardown():
-        maintain_task.cancel()
+        def teardown():
+            maintain_task.cancel()
 
-        for job_id in spark_worker_job_ids:
-            os.popen(f"scancel {job_id}").read()
+            for job_id in spark_worker_job_ids:
+                os.popen(f"scancel {job_id}").read()
 
-        os.popen(f"scancel {spark_master_job_id}").read()
+            os.popen(f"scancel {spark_master_job_id}").read()
 
-    # TODO: This cleanup doesn't seem to always work
-    atexit.register(teardown)
+        # TODO: This cleanup doesn't seem to always work
+        atexit.register(teardown)
 
     # https://moj-analytical-services.github.io/splink/demos/examples/spark/deduplicate_1k_synthetic.html
     from splink.spark.jar_location import similarity_jar_location
