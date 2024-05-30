@@ -1,11 +1,108 @@
 ### Setup ###
 
-import shutil, os
+import shutil, os, yaml
 
-configfile: "snakemake_config_defaults.yaml"
+from layered_config_tree import LayeredConfigTree
 
-if os.path.isfile("snakemake_config_overrides.yaml"):
-    configfile: "snakemake_config_overrides.yaml"
+snakemake_config = config
+
+with open('config_defaults.yaml') as stream:
+    config_defaults = yaml.safe_load(stream)
+
+with open('config_overrides.yaml') as stream:
+    config_overrides = yaml.safe_load(stream)
+
+LAYERS = [
+    ('defaults', config_defaults),
+    ('user_file_overrides', config_overrides),
+    ('snakemake_overrides', snakemake_config)
+]
+
+# https://stackoverflow.com/a/20666342
+def merge_ignoring_all(source, destination):
+    """
+    run me with nosetests --with-doctest file.py
+
+    >>> a = { 'all': 'foo', 'first' : { 'all_rows' : { 'pass' : 'dog', 'number' : '1' } } }
+    >>> b = { 'first' : { 'all_rows' : { 'all': 'bar', 'fail' : 'cat', 'number' : '5' } } }
+    >>> merge_ignoring_all(b, a) == { 'first' : { 'all_rows' : { 'pass' : 'dog', 'fail' : 'cat', 'number' : '5' } } }
+    True
+    """
+    for key, value in source.items():
+        # Zeb modification
+        if key == "all":
+            continue
+
+        if isinstance(value, dict):
+            # get node or create one
+            node = destination.setdefault(key, {})
+            merge_ignoring_all(value, node)
+        else:
+            destination[key] = value
+
+    return destination
+
+def merge_keys_by_level(list_of_keys_by_level_structures):
+    all_levels = set()
+
+    for list_of_keys_by_level_structure in list_of_keys_by_level_structures:
+        all_levels |= list_of_keys_by_level_structure.keys()
+
+    result = {}
+    for level in all_levels:
+        result[level] = set()
+        for list_of_keys_by_level_structure in list_of_keys_by_level_structures:
+            if level in list_of_keys_by_level_structure:
+                result[level] |= list_of_keys_by_level_structure[level]
+    
+    return result
+
+def all_possible_keys_by_level(config):
+    top_level_keys = set()
+    nested_keys = {}
+    for k in config:
+        top_level_keys |= {k}
+        if isinstance(config[k], dict):
+            nested_keys = merge_keys_by_level([nested_keys, all_possible_keys_by_level(config[k])])
+
+    return {
+        0: top_level_keys,
+        **{k + 1: v for k, v in nested_keys.items()}
+    }
+
+def expand_all(config, level_keys=None):
+    if "all" not in config:
+        return config
+
+    if level_keys is None:
+        level_keys = all_possible_keys_by_level(config)
+
+    all_config = expand_all(config["all"], {k - 1: v for k, v in level_keys.items() if k > 0})
+    for k in level_keys[0]:
+        if k == "all":
+            continue
+
+        if k in config and isinstance(config[k], dict):
+            merge_ignoring_all(all_config, config[k])
+        elif k not in config:
+            config[k] = all_config
+
+    del config["all"]
+    return config
+
+config = LayeredConfigTree(layers=[layer_name for layer_name, _ in LAYERS])
+
+keys_by_level = {}
+
+for layer, layer_contents in LAYERS:
+    if 'papermill_params' in layer_contents:
+        keys_by_level = merge_keys_by_level([keys_by_level, all_possible_keys_by_level(layer_contents['papermill_params'])])
+
+for layer, layer_contents in LAYERS:
+    if 'papermill_params' in layer_contents:
+        layer_contents['papermill_params'] = expand_all(layer_contents['papermill_params'], keys_by_level)
+    
+    config.update(layer_contents, layer=layer)
 
 # Need the full conda path for singularity (this path must be bound into container!)
 import shutil
@@ -34,22 +131,13 @@ def get_directory_wrapper_if_necessary(papermill_params):
 def dict_to_papermill(d):
     return ' '.join([f'-p {k} {v}' for k, v in d.items()])
 
-def papermill_params_from_config(config, rule_name):
-    # Cascading specificity
-    return {
-        **config["papermill_params"].get("all", {}).get("all", {}),
-        **config["papermill_params"].get("all", {}).get(rule_name, {}),
-        **config["papermill_params"].get(config["data_to_use"], {}).get("all", {}),
-        **config["papermill_params"].get(config["data_to_use"], {}).get(rule_name, {}),
-    }
-
 ### Generate pseudopeople-simulated datasets ###
 
 generate_pseudopeople_simulated_datasets_papermill_params = {
     'data_to_use': config["data_to_use"],
     'output_dir': f'{config["root_output_dir"]}/generate_simulated_data/',
     'very_noisy': config["data_to_use"] == 'small_sample',
-    **papermill_params_from_config(config, 'generate_pseudopeople_simulated_datasets')
+    **dict(config["papermill_params"][config["data_to_use"]]["generate_pseudopeople_simulated_datasets"])
 }
 
 output_wrapper = get_directory_wrapper_if_necessary(generate_pseudopeople_simulated_datasets_papermill_params)
@@ -98,7 +186,7 @@ rule generate_pseudopeople_simulated_datasets:
 generate_case_study_files_papermill_params = {
     'data_to_use': config["data_to_use"],
     'output_dir': f'{config["root_output_dir"]}/generate_simulated_data/',
-    **papermill_params_from_config(config, 'generate_case_study_files')
+    **dict(config["papermill_params"][config["data_to_use"]]["generate_case_study_files"]),
 }
 
 output_wrapper = get_directory_wrapper_if_necessary(generate_case_study_files_papermill_params)
@@ -139,7 +227,7 @@ link_datasets_papermill_params = {
     'data_to_use': config["data_to_use"],
     'input_dir': f'{config["root_output_dir"]}/generate_simulated_data/',
     'output_dir': f'{config["root_output_dir"]}/results/',
-    **papermill_params_from_config(config, 'link_datasets')
+    **dict(config["papermill_params"][config["data_to_use"]]["link_datasets"]),
 }
 
 output_wrapper = get_directory_wrapper_if_necessary(link_datasets_papermill_params)
@@ -168,7 +256,7 @@ calculate_ground_truth_accuracy_papermill_params = {
     'data_to_use': config["data_to_use"],
     'simulated_data_output_dir': f'{config["root_output_dir"]}/generate_simulated_data/',
     'case_study_output_dir': f'{config["root_output_dir"]}/results/',
-    **papermill_params_from_config(config, 'calculate_ground_truth_accuracy')
+    **dict(config["papermill_params"][config["data_to_use"]]["calculate_ground_truth_accuracy"]),
 }
 
 rule calculate_ground_truth_accuracy:
