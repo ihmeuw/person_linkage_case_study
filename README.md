@@ -1,6 +1,6 @@
 # Person linkage case study
 
-This directory contains a case study emulating Census Bureau person linkage methods,
+This repository contains a case study emulating Census Bureau person linkage methods,
 primarily based on public descriptions of the Person Identification Validation System.
 For more details, see the notebook files themselves.
 
