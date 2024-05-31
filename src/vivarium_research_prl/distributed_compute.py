@@ -7,6 +7,7 @@ import pandas
 from dataclasses import dataclass
 import types
 import uuid
+from IPython.display import display
 from . import utils
 
 def start_dask_distributed_over_slurm(
@@ -185,7 +186,7 @@ def start_dask_local(
     threads_per_worker,
     memory_per_worker,
     local_directory,
-    **kwargs,
+    **kwargs, # Ignored: the rest isn't relevant for local clusters
 ):
     from dask.distributed import LocalCluster
     import dask
@@ -200,7 +201,6 @@ def start_dask_local(
         memory_limit=memory_per_worker,
         threads_per_worker=threads_per_worker,
         local_directory=local_directory,
-        **kwargs,
     )
     client = cluster.get_client()
 
@@ -649,6 +649,8 @@ def to_pyarrow_large_string(df):
 
 def start_spark_cluster(
     local: bool,
+    conda_path: str | pathlib.Path,
+    conda_env: str,
     cpus_master: int,
     memory_master: int,
     num_workers: int,
@@ -689,7 +691,7 @@ def start_spark_cluster(
         spark_start_master_output = os.popen(
             f"sbatch {sbatch_log_part} "
             f"--cpus-per-task {cpus_master} --mem {memory_master} "
-            f"--time {master_walltime} {extra_kwargs_part} {code_dir}/start_spark_master.sh"
+            f"--time {master_walltime} {extra_kwargs_part} {code_dir}/start_spark_master.sh {conda_path} {conda_env}"
         ).read()
         spark_master_job_id = re.match('Submitted batch job (\d+)', spark_start_master_output)[1]
 
@@ -718,7 +720,7 @@ def start_spark_cluster(
             spark_start_workers_output = os.popen(
                 f"sbatch {array_job_sbatch_log_part} "
                 f"--array=1-{n_workers} --cpus-per-task {cpus_per_worker} --mem {memory_per_worker + worker_memory_overhead_mb} "
-                f"--time {worker_walltime} {extra_kwargs_part} {code_dir}/start_spark_workers.sh {spark_master_url} {local_directory}"
+                f"--time {worker_walltime} {extra_kwargs_part} {code_dir}/start_spark_workers.sh {conda_path} {conda_env} {spark_master_url} {local_directory}"
             ).read()
             job_id = re.match('Submitted batch job (\d+)', spark_start_workers_output)[1]
             spark_worker_job_ids.append(job_id)
@@ -759,6 +761,8 @@ def start_spark_cluster(
 
             for job_id in spark_worker_job_ids:
                 os.popen(f"scancel {job_id}").read()
+            
+            time.sleep(10)
 
             os.popen(f"scancel {spark_master_job_id}").read()
 
