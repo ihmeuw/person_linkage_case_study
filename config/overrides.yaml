@@ -1,9 +1,0 @@
-conda_environment_name: person_linkage_case_study_3
-# custom_spark_container_path: spark_slurm_container/spark.sif
-# papermill_params:
-#   all:
-#     all:
-#       compute_engine: dask_local
-#     link_datasets:
-#       splink_engine: spark
-#       spark_local: True
