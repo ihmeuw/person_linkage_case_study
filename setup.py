@@ -16,37 +16,55 @@ if __name__ == "__main__":
         long_description = f.read()
 
     install_requirements = [
-        'numpy',
-        'pandas',
-        'scipy',
-        'tables', # For reading .hdf files
+        # Core libraries
+        "pandas",
+        "pyarrow",
+        "numpy",
+        "matplotlib",
+        "pseudopeople",
+        "splink",
+        "jellyfish",
+        # Workflow management
+        "snakemake",
+        "papermill",
+        # Pins
+        "pulp<2.8",  # Needed for snakemake, see https://github.com/snakemake/snakemake/issues/2607#issuecomment-1948732242
     ]
-    test_requirements = [
-        'pytest',
+    dask_requirements = [
+        "pseudopeople[dask]",
+        "dask_jobqueue",
+        "bokeh!=3.0.*,>=2.4.2",  # needed for dask dashboard
     ]
+    spark_requirements = [
+        "pyspark==3.4.1",  # NOTE: I have no idea why, but pyspark 3.5.0 (with the correct version of Spark) would hang forever on the first stage
+    ]
+    dev_requirements = (
+        [
+            "jupyterlab",
+            "nbdime",
+            "black[jupyter]",
+        ]
+        + dask_requirements
+        + spark_requirements
+    )
 
     setup(
-        name=about['__title__'],
-        version=about['__version__'],
-
-        description=about['__summary__'],
+        name=about["__title__"],
+        version=about["__version__"],
+        description=about["__summary__"],
         long_description=long_description,
-        license=about['__license__'],
+        license=about["__license__"],
         url=about["__uri__"],
-
         author=about["__author__"],
         author_email=about["__email__"],
-
-        package_dir={'': 'src'},
-        packages=find_packages(where='src'),
+        package_dir={"": "src"},
+        packages=find_packages(where="src"),
         include_package_data=True,
-
         install_requires=install_requirements,
-        test_require=test_requirements,
         extras_require={
-            'test': test_requirements,
+            "dask": dask_requirements,
+            "spark": spark_requirements,
+            "dev": dev_requirements,
         },
-
         zip_safe=False,
-
     )

@@ -1,0 +1,53 @@
+data_to_use: small_sample
+root_output_dir: output
+conda_environment_name: person_linkage_case_study
+custom_run_suffix: ''
+papermill_params:
+  small_sample:
+    all:
+      compute_engine: pandas
+    link_datasets:
+      splink_engine: duckdb
+  ri:
+    all:
+      compute_engine: dask
+    generate_pseudopeople_simulated_datasets:
+      compute_engine_num_workers: 100
+      compute_engine_memory_per_worker: 30GB
+      compute_engine_cpus_per_worker: 5
+    generate_case_study_files:
+      compute_engine_num_workers: 10
+      compute_engine_memory_per_worker: 60GB
+      compute_engine_cpus_per_worker: 2
+    link_datasets:
+      compute_engine_num_workers: 10
+      compute_engine_memory_per_worker: 15GB
+      compute_engine_cpus_per_worker: 2
+      spark_cpus_master: 10
+      spark_memory_master: 30GB
+      spark_num_workers: 50
+      spark_memory_per_worker: 30GB
+      spark_cpus_per_worker: 2
+      spark_worker_memory_overhead_mb: 5_000
+    calculate_ground_truth_accuracy:
+      compute_engine_num_workers: 20
+      compute_engine_memory_per_worker: 30GB
+      compute_engine_cpus_per_worker: 2
+  usa:
+    all:
+      compute_engine: dask
+      compute_engine_num_workers: 50
+      compute_engine_memory_per_worker: 120GB
+      compute_engine_cpus_per_worker: 2
+      compute_engine_memory_constrained: False
+    generate_pseudopeople_simulated_datasets:
+      compute_engine_num_workers: 100
+      compute_engine_memory_per_worker: 30GB
+    link_datasets:
+      splink_engine: spark
+      spark_cpus_master: 10
+      spark_memory_master: 40GB
+      spark_num_workers: 50
+      spark_memory_per_worker: 120GB
+      spark_cpus_per_worker: 2
+      spark_worker_memory_overhead_mb: 5_000
