@@ -91,6 +91,7 @@ rule generate_pseudopeople_simulated_datasets:
 
 generate_case_study_files_papermill_params = {
     'data_to_use': config["data_to_use"],
+    'input_dir': f'{config["root_output_dir"]}/01_generate_pseudopeople_simulated_datasets/',
     'output_dir': f'{config["root_output_dir"]}/02_generate_case_study_files/',
     **dict(config["papermill_params"][config["data_to_use"]]["generate_case_study_files"]),
 }
