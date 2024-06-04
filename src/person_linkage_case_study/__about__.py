@@ -10,7 +10,7 @@ __all__ = [
 ]
 
 __title__ = "person_linkage_case_study"
-__summary__ = "Utilities for the UW Person Linkage Case Study."
+__summary__ = "Utilities for the UW person linkage case study."
 __uri__ = "https://github.com/ihmeuw/person_linkage_case_study"
 
 __version__ = "0.0.1"

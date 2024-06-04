@@ -179,7 +179,7 @@ def start_dask_distributed_over_slurm(
     from distributed import Client
     client = Client(cluster)
 
-    return cluster, client
+    return client
 
 def start_dask_local(
     num_workers,
@@ -204,7 +204,7 @@ def start_dask_local(
     )
     client = cluster.get_client()
 
-    return cluster, client
+    return client
 
 def start_compute_engine(compute_engine, num_workers=3, memory_per_worker="10GB", threads_per_worker=1, num_row_groups=None, **kwargs):
     client = None
@@ -217,13 +217,13 @@ def start_compute_engine(compute_engine, num_workers=3, memory_per_worker="10GB"
         # Worked around this using large_strings in pyarrow instead
         # dask.config.set({"dataframe.convert-string": False})
 
-        cluster, client = start_dask_distributed_over_slurm(num_workers=num_workers, memory_per_worker=memory_per_worker, threads_per_worker=threads_per_worker, **kwargs)
+        client = start_dask_distributed_over_slurm(num_workers=num_workers, memory_per_worker=memory_per_worker, threads_per_worker=threads_per_worker, **kwargs)
 
         import dask.dataframe as pd
 
         display(client)
     elif compute_engine == 'dask_local':
-        cluster, client = start_dask_local(num_workers=num_workers, memory_per_worker=memory_per_worker, threads_per_worker=threads_per_worker, **kwargs)
+        client = start_dask_local(num_workers=num_workers, memory_per_worker=memory_per_worker, threads_per_worker=threads_per_worker, **kwargs)
 
         display(client)
 
@@ -237,9 +237,9 @@ def start_compute_engine(compute_engine, num_workers=3, memory_per_worker="10GB"
             modin_cfg.Engine.put("dask") # Use dask instead of ray (which is the default)
 
             if compute_engine == 'modin_dask_distributed':
-                cluster, client = start_dask_distributed_over_slurm(num_workers=num_workers, memory_per_worker=memory_per_worker, threads_per_worker=threads_per_worker, **kwargs)
+                client = start_dask_distributed_over_slurm(num_workers=num_workers, memory_per_worker=memory_per_worker, threads_per_worker=threads_per_worker, **kwargs)
             elif compute_engine == 'modin_dask_local':
-                cluster, client = start_dask_local(num_workers=num_workers, memory_per_worker=memory_per_worker, threads_per_worker=threads_per_worker, **kwargs)
+                client = start_dask_local(num_workers=num_workers, memory_per_worker=memory_per_worker, threads_per_worker=threads_per_worker, **kwargs)
             else:
                 raise ValueError()
 

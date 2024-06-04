@@ -1,5 +1,4 @@
 # Data
-data/
 *.parquet
 
 # Splink charts
@@ -42,5 +41,5 @@ __pycache__/
 slurm-*.out
 
 output/
-config_overrides.yaml
+config/overrides.yaml
 *.sif
