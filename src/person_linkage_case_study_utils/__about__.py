@@ -9,7 +9,7 @@ __all__ = [
     "__copyright__",
 ]
 
-__title__ = "person_linkage_case_study"
+__title__ = "person_linkage_case_study_utils"
 __summary__ = "Utilities for the UW person linkage case study."
 __uri__ = "https://github.com/ihmeuw/person_linkage_case_study"
 

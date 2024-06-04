@@ -2,7 +2,7 @@
 
 import shutil, os, yaml
 
-from person_linkage_case_study.snakemake_utils import config_from_layers, get_directory_wrapper_if_necessary, dict_to_papermill
+from person_linkage_case_study_utils.snakemake_utils import config_from_layers, get_directory_wrapper_if_necessary, dict_to_papermill
 
 snakemake_config = config
 
