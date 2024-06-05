@@ -37,7 +37,7 @@ $ conda activate person_linkage_case_study
 (person_linkage_case_study) $ pip install -e .
 ```
 
-If the `conda.lock.txt` line doesn't work for some reason, you can roughly recreate
+If the `conda.lock.txt` line doesn't work because you aren't on Linux or for some other reason, you can roughly recreate
 the environment necessary with `conda create --name person_linkage_case_study python=3.10`.
 If the `pip.lock.txt` line doesn't work for some reason, it can be skipped to
 approximate the environment.
@@ -90,6 +90,14 @@ These overrides say to use Dask and Spark locally (on your computer).
 
 You will need to install [Singularity](https://docs.sylabs.io/guides/latest/user-guide/) to run this, because Spark cannot
 be installed via conda.
+
+You also need to install additional Python packages, like so:
+
+```console
+$ pip install -r pip.lock-dask.txt
+$ pip install -r pip.lock-spark.txt
+$ pip install -e .[dask,spark]
+```
 
 Now, run `snakemake --forceall` to re-run the entire case study using these settings.
 You will see a lot more output this time, but you should get the same result.
