@@ -22,7 +22,7 @@ jobs:
           cat $GITHUB_ENV
       - name: Install lint dependencies from lock file
         run: |
-          pip install -r pip.dev.txt
+          pip install -r pip.lock-dev.txt
           pip install .[dev]
       - name: Lint
         run: |
