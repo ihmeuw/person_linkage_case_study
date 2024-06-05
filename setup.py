@@ -42,14 +42,12 @@ if __name__ == "__main__":
     spark_requirements = [
         "pyspark==3.4.1",  # NOTE: I have no idea why, but pyspark 3.5.0 (with the correct version of Spark) would hang forever on the first stage
     ]
-    dev_requirements = (
-        [
-            "jupyterlab",
-            "nbdime",
-            "black[jupyter]",
-            "isort",
-        ]
-    )
+    dev_requirements = [
+        "jupyterlab",
+        "nbdime",
+        "black[jupyter]",
+        "isort",
+    ]
 
     setup(
         name=about["__title__"],
