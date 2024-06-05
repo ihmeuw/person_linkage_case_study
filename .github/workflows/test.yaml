@@ -14,23 +14,20 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
-      - name: Set up Python
-        uses: actions/setup-python@v4
+      - uses: s-weigand/setup-conda@v1
         with:
-          python-version: "3.10"
-      - name: Print environment values
+          activate-conda: false
+      - name: Create conda environment from lock file
         run: |
-          python --version
-          cat $GITHUB_ENV
-      - name: Update pip
+          conda create --name person_linkage_case_study --file conda.lock.txt
+      - name: Install pip dependencies from lock file
         run: |
-          python -m pip install --upgrade pip
-      - name: Install dependencies from lock file
-        run: |
+          conda activate person_linkage_case_study
           pip install -r pip.lock.txt
           pip install .
       - name: Run pipeline
         run: |
+          conda activate person_linkage_case_study
           snakemake --forceall
       - name: Send mail
         # Notify when cron job fails
