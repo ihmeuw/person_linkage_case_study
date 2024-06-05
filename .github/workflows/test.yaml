@@ -20,7 +20,7 @@ jobs:
           activate-environment: person_linkage_case_study
       - name: Update environment from lock file
         run:
-          conda update -n person_linkage_case_study -f conda.lock.txt
+          conda update -n person_linkage_case_study --file conda.lock.txt
       - name: Install pip dependencies from lock file
         run: |
           pip install -r pip.lock.txt
