@@ -1,5 +1,6 @@
+import os
 import pathlib
-import os, shutil
+import shutil
 
 
 def remove_path(path):
