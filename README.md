@@ -94,9 +94,9 @@ be installed via conda.
 You also need to install additional Python packages, like so:
 
 ```console
-pip install -r pip.lock-dask.txt
-pip install -r pip.lock-spark.txt
-pip install -e .[dask,spark]
+$ pip install -r pip.lock-dask.txt
+$ pip install -r pip.lock-spark.txt
+$ pip install -e .[dask,spark]
 ```
 
 Now, run `snakemake --forceall` to re-run the entire case study using these settings.
