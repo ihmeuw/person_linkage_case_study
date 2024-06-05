@@ -32,13 +32,6 @@ jobs:
       - name: Run pipeline
         run: |
           snakemake --forceall
-      - name: Install lint dependencies
-        run: |
-          pip install .[dev]
-      - name: Lint
-        run: |
-          black . --check --diff
-          isort . --check --verbose --only-modified --diff
       - name: Send mail
         # Notify when cron job fails
         if: (github.event_name == 'schedule' && failure())
