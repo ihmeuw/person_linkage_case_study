@@ -24,9 +24,11 @@ if __name__ == "__main__":
         "pseudopeople",
         "splink",
         "jellyfish",
-        # Workflow management
+        # Workflow management and headless Jupyter
         "snakemake",
         "papermill",
+        "ipython",
+        "ipykernel",
         # Pins
         "pulp<2.8",  # Needed for snakemake, see https://github.com/snakemake/snakemake/issues/2607#issuecomment-1948732242
     ]
@@ -43,9 +45,8 @@ if __name__ == "__main__":
             "jupyterlab",
             "nbdime",
             "black[jupyter]",
+            "isort",
         ]
-        + dask_requirements
-        + spark_requirements
     )
 
     setup(
