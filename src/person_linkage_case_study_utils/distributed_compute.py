@@ -330,7 +330,6 @@ def start_compute_engine(
             modin_cfg.IsDebug.put(True)
 
         import modin.pandas as pd
-
         # https://modin.readthedocs.io/en/stable/usage_guide/advanced_usage/progress_bar.html
         from modin.config import ProgressBar
 
