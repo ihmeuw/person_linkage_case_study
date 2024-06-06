@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 import os
 
-from setuptools import setup, find_packages
+from setuptools import find_packages, setup
 
 if __name__ == "__main__":
 
@@ -9,7 +9,9 @@ if __name__ == "__main__":
     src_dir = os.path.join(base_dir, "src")
 
     about = {}
-    with open(os.path.join(src_dir, "person_linkage_case_study_utils", "__about__.py")) as f:
+    with open(
+        os.path.join(src_dir, "person_linkage_case_study_utils", "__about__.py")
+    ) as f:
         exec(f.read(), about)
 
     with open(os.path.join(base_dir, "README.md")) as f:
@@ -40,14 +42,12 @@ if __name__ == "__main__":
     spark_requirements = [
         "pyspark==3.4.1",  # NOTE: I have no idea why, but pyspark 3.5.0 (with the correct version of Spark) would hang forever on the first stage
     ]
-    dev_requirements = (
-        [
-            "jupyterlab",
-            "nbdime",
-            "black[jupyter]",
-            "isort",
-        ]
-    )
+    dev_requirements = [
+        "jupyterlab",
+        "nbdime",
+        "black[jupyter]",
+        "isort",
+    ]
 
     setup(
         name=about["__title__"],

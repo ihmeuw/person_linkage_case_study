@@ -1,0 +1,29 @@
+# -----------------------------------------------------------------------------
+#   - invoked on push, pull_request, manual trigger
+# -----------------------------------------------------------------------------
+name: lint
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.10"
+      - name: Print environment values
+        run: |
+          python --version
+          cat $GITHUB_ENV
+      - name: Install lint dependencies from lock file
+        run: |
+          pip install -r pip.lock-dev.txt
+      - name: Lint
+        run: |
+          black . --check --diff
+          isort . --check --verbose --only-modified --diff

@@ -1,13 +1,20 @@
-import glob
-import os, time, datetime, pathlib, re, atexit
 import asyncio
-import requests
-from typing import Any, Dict, Literal
-import pandas
-from dataclasses import dataclass
+import atexit
+import datetime
+import glob
+import os
+import pathlib
+import re
+import time
 import types
 import uuid
+from dataclasses import dataclass
+from typing import Any, Dict, Literal
+
+import pandas
+import requests
 from IPython.display import display
+
 from . import utils
 
 
@@ -209,8 +216,8 @@ def start_dask_local(
     local_directory,
     **kwargs,  # Ignored: the rest isn't relevant for local clusters
 ):
-    from dask.distributed import LocalCluster
     import dask
+    from dask.distributed import LocalCluster
 
     dask.config.set({"distributed.worker.memory.terminate": False})
     dask.config.set({"distributed.scheduler.worker-ttl": None})
@@ -961,11 +968,9 @@ def start_spark_cluster(
         atexit.register(teardown)
 
     # https://moj-analytical-services.github.io/splink/demos/examples/spark/deduplicate_1k_synthetic.html
+    from pyspark import SparkConf, SparkContext
+    from pyspark.sql import SparkSession, types
     from splink.spark.jar_location import similarity_jar_location
-
-    from pyspark import SparkContext, SparkConf
-    from pyspark.sql import SparkSession
-    from pyspark.sql import types
 
     conf = SparkConf()
     conf.setMaster(spark_master_url)

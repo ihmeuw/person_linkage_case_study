@@ -1,0 +1,49 @@
+# -----------------------------------------------------------------------------
+#   - invoked on push, pull_request, manual trigger, or schedule
+# -----------------------------------------------------------------------------
+name: test
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+  schedule: 
+    - cron: "0 8 * * 1"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: conda-incubator/setup-miniconda@v3
+        with:
+          miniforge-version: latest
+          activate-environment: person_linkage_case_study
+      - name: Update environment from lock file
+        run:
+          conda update -n person_linkage_case_study --file conda.lock.txt
+      - name: Install pip dependencies from lock file
+        run: |
+          pip install -r pip.lock.txt
+          pip install .
+      - name: Run pipeline
+        run: |
+          snakemake --forceall
+      - name: Send mail
+        # Notify when cron job fails
+        if: (github.event_name == 'schedule' && failure())
+        uses: dawidd6/action-send-mail@v2
+        with:
+          # mail server settings
+          server_address: smtp.gmail.com
+          server_port: 465
+          # user credentials
+          username: ${{ secrets.NOTIFY_EMAIL }}
+          password: ${{ secrets.NOTIFY_PASSWORD }}
+          # email subject
+          subject: ${{ github.job }} job of ${{ github.repository }} has ${{ job.status }}
+          # email body as text
+          body: ${{ github.job }} job in worflow ${{ github.workflow }} of ${{ github.repository }} has ${{ job.status }}
+          # comma-separated string, send email to
+          to: uw_ihme_simulationscience@uw.edu
+          # from email name
+          from: Person Linkage Case Study Notifications
