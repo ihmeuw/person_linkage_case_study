@@ -20,7 +20,7 @@ args = parser.parse_args()
 
 host = socket.getfqdn()
 
-if args.conda_path != "":
+if args.conda_path in ("", "None"):
     conda_activate_part = f"""
     source {Path(args.conda_path).parent.parent / "etc/profile.d/conda.sh"}
     conda activate {args.conda_prefix}
@@ -28,7 +28,7 @@ if args.conda_path != "":
 else:
     conda_activate_part = ""
 
-if args.venv_path != "":
+if args.venv_path in ("", "None"):
     venv_activate_part = f"source {args.venv_path}/bin/activate"
 else:
     venv_activate_part = ""

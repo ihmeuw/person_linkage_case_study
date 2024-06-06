@@ -3,12 +3,12 @@ import atexit
 import datetime
 import glob
 import os
-import pathlib
 import re
 import time
 import types
 import uuid
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Dict, Literal
 
 import pandas
@@ -20,8 +20,8 @@ from . import utils
 
 def start_dask_distributed_over_slurm(
     num_workers: int,
-    local_directory: str | pathlib.Path,
-    log_directory: str | pathlib.Path = None,
+    local_directory: str | Path,
+    log_directory: str | Path = None,
     # If you give dask workers more than one core, they will use it to
     # run more tasks at once, which can use more memory than is available.
     # To have more than one thread per worker but use them all for
@@ -810,23 +810,23 @@ def to_pyarrow_large_string(df):
 
 def start_spark_cluster(
     local: bool,
-    singularity_path: str | pathlib.Path,
+    singularity_path: str | Path,
     singularity_image: str,
     singularity_args: str,
-    conda_path: str | pathlib.Path,
-    conda_prefix: str | pathlib.Path,
-    venv_path: str | pathlib.Path,
+    conda_path: str | Path,
+    conda_prefix: str | Path,
+    venv_path: str | Path,
     cpus_master: int,
     memory_master: int,
     num_workers: int,
-    checkpoint_directory: str | pathlib.Path,
-    local_directory: str | pathlib.Path = "/tmp/spark",
+    checkpoint_directory: str | Path,
+    local_directory: str | Path = "/tmp/spark",
     master_walltime: str = None,
     cpus_per_worker: int = 1,
     worker_walltime: str = None,
     memory_per_worker: str = "10GB",
     worker_memory_overhead_mb: int = 500,
-    log_directory: str | pathlib.Path = None,
+    log_directory: str | Path = None,
     scheduler: Literal[
         "slurm", "htcondor", "lsf", "moab", "oar", "pbs", "sge"
     ] = "slurm",
