@@ -810,8 +810,12 @@ def to_pyarrow_large_string(df):
 
 def start_spark_cluster(
     local: bool,
+    singularity_path: str | pathlib.Path,
+    singularity_image: str,
+    singularity_args: str,
     conda_path: str | pathlib.Path,
-    conda_env: str,
+    conda_prefix: str | pathlib.Path,
+    venv_path: str | pathlib.Path,
     cpus_master: int,
     memory_master: int,
     num_workers: int,
@@ -832,9 +836,12 @@ def start_spark_cluster(
     memory_per_worker = _convert_to_mb(memory_per_worker)
 
     if local:
-        spark_master_url = f"local[{num_workers}]"
+        # https://spark.apache.org/docs/latest/submitting-applications.html
+        # local[K,F] Run Spark locally with K worker threads and F maxFailures (see spark.task.maxFailures for an explanation of this variable). 
+        spark_master_url = f"local[{num_workers},2]"
         teardown = lambda: None
     else:
+        from shlex import quote
         assert (
             scheduler == "slurm"
         ), "Distributed Spark can currently only be run on Slurm"
@@ -851,7 +858,7 @@ def start_spark_cluster(
         )
 
         extra_kwargs_part = " ".join(
-            [f"--{k} '{v}'" for k, v in extra_scheduler_kwargs.items()]
+            [f"--{k} {quote(str(v))}" for k, v in extra_scheduler_kwargs.items()]
         )
 
         code_dir = os.path.abspath(os.path.dirname(__file__))
@@ -860,7 +867,7 @@ def start_spark_cluster(
         spark_start_master_output = os.popen(
             f"sbatch {sbatch_log_part} "
             f"--cpus-per-task {cpus_master} --mem {memory_master} "
-            f"--time {master_walltime} {extra_kwargs_part} {code_dir}/start_spark_master.sh {conda_path} {conda_env}"
+            f"--time {master_walltime} {extra_kwargs_part} {code_dir}/start_spark_master.py {quote(str(singularity_path))} {quote(str(singularity_image))} {quote(str(singularity_args))} {quote(str(conda_path))} {quote(str(conda_prefix))} {quote(str(venv_path))}"
         ).read()
         spark_master_job_id = re.match(
             "Submitted batch job (\d+)", spark_start_master_output
@@ -900,7 +907,7 @@ def start_spark_cluster(
             spark_start_workers_output = os.popen(
                 f"sbatch {array_job_sbatch_log_part} "
                 f"--array=1-{n_workers} --cpus-per-task {cpus_per_worker} --mem {memory_per_worker + worker_memory_overhead_mb} "
-                f"--time {worker_walltime} {extra_kwargs_part} {code_dir}/start_spark_workers.sh {conda_path} {conda_env} {spark_master_url} {local_directory}"
+                f"--time {worker_walltime} {extra_kwargs_part} {code_dir}/start_spark_workers.py {quote(str(singularity_path))} {quote(str(singularity_image))} {quote(str(singularity_args))} {quote(str(conda_path))} {quote(str(conda_prefix))} {quote(str(venv_path))} {quote(str(spark_master_url))} {quote(str(local_directory))}"
             ).read()
             job_id = re.match("Submitted batch job (\d+)", spark_start_workers_output)[
                 1

@@ -127,4 +127,5 @@ def get_directory_wrapper_if_necessary(papermill_params):
 # because it does not generate incremental output, nor output notebooks when there is
 # an error. See https://github.com/snakemake/snakemake/pull/2857
 def dict_to_papermill(d):
-    return " ".join([f"-p {k} {v}" for k, v in d.items()])
+    from shlex import quote
+    return " ".join([f"-p {quote(str(k))} {quote(str(v))}" for k, v in d.items()])

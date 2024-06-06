@@ -23,11 +23,51 @@ LAYERS = [
 
 config = config_from_layers(LAYERS)
 
-# Need the full conda path for singularity (this path must be bound into container!)
-if "conda_path" not in config:
-    import shutil
+# NOTE: For now, determining this from whether or not this *Snakefile* is being
+# run inside a conda environment and/or venv.
 
-    config.update({"conda_path": shutil.which('conda')})
+# NOTE: We do not use the built-in Snakemake-conda integration because
+# it only supports environment *names*, not paths.
+use_conda = "CONDA_PREFIX" in os.environ
+
+if use_conda:
+    conda_path = os.environ["CONDA_EXE"]
+    conda_prefix = os.environ["CONDA_PREFIX"]
+    conda_activate_part = f'''
+    source {Path(conda_path).parent.parent / "etc/profile.d/conda.sh"}
+    conda activate {conda_prefix}
+    '''
+else:
+    conda_path = None
+    conda_prefix = None
+    conda_activate_part = ''
+
+# https://stackoverflow.com/a/1883251/
+use_venv = sys.prefix != sys.base_prefix
+
+if use_venv:
+    venv_path = sys.prefix
+    venv_activate_part = f'source {venv_path}/bin/activate'
+else:
+    venv_path = None
+    venv_activate_part = ''
+
+if "singularity_bindings" in config:
+    singularity_bindings = config["singularity_bindings"]
+else:
+    singularity_bindings = []
+
+singularity_bindings.append('/tmp')
+
+if use_conda:
+    singularity_bindings.append(Path(conda_path).parent.parent)
+
+if use_venv:
+    singularity_bindings.append(venv_path)
+
+if len(singularity_bindings) > 0:
+    singularity_args = f'-B {",".join([str(s) for s in singularity_bindings])}'
+    workflow._singularity_args += ' ' + singularity_args
 
 executed_notebooks_dir = f'diagnostics/executed_notebooks/{config["data_to_use"]}'
 
@@ -74,14 +114,21 @@ pseudopeople_simulated_datasets_paths = [
     for p in pseudopeople_simulated_datasets_paths
 ]
 
+# NOTE: Including conda_activate_part and venv_activate_part isn't strictly necessary
+# when rules inherit environment variables from the Python process running this Snakefile,
+# but that won't be the case for Singularity rules or if running with a non-local Snakemake executor.
+# We include them in all rules to be explicit.
 rule generate_pseudopeople_simulated_datasets:
     input: "01_generate_pseudopeople_simulated_datasets.ipynb"
     log: f'{executed_notebooks_dir}/01_generate_pseudopeople_simulated_datasets.ipynb'
     output:
         [output_wrapper(p) for p in pseudopeople_simulated_datasets_paths]
-    conda: config["conda_environment_name"]
     shell:
-        f"papermill {{input}} {{log}} {dict_to_papermill(generate_pseudopeople_simulated_datasets_papermill_params)} -k python3"
+        f"""
+        {conda_activate_part}
+        {venv_activate_part}
+        papermill {{input}} {{log}} {dict_to_papermill(generate_pseudopeople_simulated_datasets_papermill_params)} -k python3
+        """
 
 ### Generate case study files ###
 
@@ -124,18 +171,38 @@ rule generate_case_study_files:
     log: f'{executed_notebooks_dir}/02_generate_case_study_files.ipynb'
     output:
         [output_wrapper(p) for p in case_study_files_paths]
-    conda: config["conda_environment_name"]
     shell:
-        f"papermill {{input[0]}} {{log}} {dict_to_papermill(generate_case_study_files_papermill_params)} -k python3"
+        f"""
+        {conda_activate_part}
+        {venv_activate_part}
+        papermill {{input[0]}} {{log}} {dict_to_papermill(generate_case_study_files_papermill_params)} -k python3
+        """
 
 ### Link datasets ###
+
+if config["papermill_params"][config["data_to_use"]]["link_datasets"]["splink_engine"] == "spark":
+    # We need to run inside a container, which also means we need to use conda manually
+    # instead of relying on the Snakemake-conda integration.
+    if "custom_spark_container_path" in config:
+        singularity_image = config["custom_spark_container_path"]
+    else:
+        singularity_image = "docker://apache/spark@sha256:a1dd2487a97fb5e35c5a5b409e830b501a92919029c62f9a559b13c4f5c50f63"
+    
+    singularity_path = shutil.which('singularity')
+else:
+    singularity_image = None
+    singularity_path = None
 
 link_datasets_papermill_params = {
     'data_to_use': config["data_to_use"],
     'input_dir': f'{config["root_output_dir"]}/02_generate_case_study_files/',
     'output_dir': f'{config["root_output_dir"]}/03_link_datasets/',
-    'conda_path': config["conda_path"],
-    'conda_env': config["conda_environment_name"],
+    'singularity_path': singularity_path,
+    'singularity_image': singularity_image,
+    'singularity_args': singularity_args,
+    'conda_path': conda_path,
+    'conda_prefix': conda_prefix,
+    'venv_path': venv_path,
     **dict(config["papermill_params"][config["data_to_use"]]["link_datasets"]),
 }
 
@@ -146,23 +213,8 @@ linkage_outputs = [
     f'{config["root_output_dir"]}/03_link_datasets/{config["data_to_use"]}/confirmed_piks.parquet',
 ]
 
-if link_datasets_papermill_params["splink_engine"] == "spark":
-    # We need to run inside a container, which also means we need to use conda manually
-    # instead of relying on the Snakemake-conda integration.
-    if "custom_spark_container_path" in config:
-        container_path = config["custom_spark_container_path"]
-    else:
-        container_path = "docker://apache/spark@sha256:a1dd2487a97fb5e35c5a5b409e830b501a92919029c62f9a559b13c4f5c50f63"
-    conda_run_part = f'{config["conda_path"]} run --no-capture-output -n {config["conda_environment_name"]}'
-    conda_name = None
-else:
-    container_path = None
-    conda_run_part = ''
-    conda_name = config["conda_environment_name"]
-
 rule link_datasets:
-    container: container_path
-    conda: conda_name
+    container: singularity_image
     benchmark:
         f'benchmarks/benchmark-{config["data_to_use"]}.txt'
     input:
@@ -172,7 +224,11 @@ rule link_datasets:
     output:
         [output_wrapper(p) for p in linkage_outputs]
     shell:
-        f'{conda_run_part} papermill {{input[0]}} {{log}} {dict_to_papermill(link_datasets_papermill_params)} -k python3'
+        f"""
+        {conda_activate_part}
+        {venv_activate_part}
+        papermill {{input[0]}} {{log}} {dict_to_papermill(link_datasets_papermill_params)} -k python3
+        """
 
 ### Calculate ground-truth accuracy ###
 
@@ -187,9 +243,12 @@ rule calculate_ground_truth_accuracy:
     input:
         ["04_calculate_ground_truth_accuracy.ipynb"] + case_study_files_paths + linkage_outputs
     log: f'{executed_notebooks_dir}/04_calculate_ground_truth_accuracy.ipynb'
-    conda: config["conda_environment_name"]
     shell:
-        f"papermill {{input[0]}} {{log}} {dict_to_papermill(calculate_ground_truth_accuracy_papermill_params)} -k python3"
+        f"""
+        {conda_activate_part}
+        {venv_activate_part}
+        papermill {{input[0]}} {{log}} {dict_to_papermill(calculate_ground_truth_accuracy_papermill_params)} -k python3
+        """
 
 
 # For debugging, it may be helpful to run the notebooks through Snakemake, but in the browser.
