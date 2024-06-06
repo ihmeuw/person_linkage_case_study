@@ -128,4 +128,5 @@ def get_directory_wrapper_if_necessary(papermill_params):
 # an error. See https://github.com/snakemake/snakemake/pull/2857
 def dict_to_papermill(d):
     from shlex import quote
+
     return " ".join([f"-p {quote(str(k))} {quote(str(v))}" for k, v in d.items()])

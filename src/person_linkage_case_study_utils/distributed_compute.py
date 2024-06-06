@@ -837,11 +837,12 @@ def start_spark_cluster(
 
     if local:
         # https://spark.apache.org/docs/latest/submitting-applications.html
-        # local[K,F] Run Spark locally with K worker threads and F maxFailures (see spark.task.maxFailures for an explanation of this variable). 
+        # local[K,F] Run Spark locally with K worker threads and F maxFailures (see spark.task.maxFailures for an explanation of this variable).
         spark_master_url = f"local[{num_workers},2]"
         teardown = lambda: None
     else:
         from shlex import quote
+
         assert (
             scheduler == "slurm"
         ), "Distributed Spark can currently only be run on Slurm"
