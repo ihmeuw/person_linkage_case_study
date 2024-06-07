@@ -127,6 +127,17 @@ Slurm.
 You will likely also want to configure the resources requested; see [`config/defaults.yaml`](.config/defaults.yaml)
 for examples of this.
 
+You will now need access to your job scheduler from inside the Singularity image for Spark.
+An example container for this purpose, which works on IHME's Slurm cluster, is included in
+this repository. To use this example, run
+
+```console
+$ singularity build --fakeroot spark_slurm_container/spark.sif spark_slurm_container/Singularity
+```
+
+and then add `custom_spark_container_path: spark_slurm_container/spark.sif` to the top
+level of your configuration YAML.
+
 ## Distributed Spark
 
 The same reasoning goes for Spark as for Dask: you may want to run it across multiple machines
@@ -141,6 +152,7 @@ The configuration looks as follows:
 papermill_params:
   small_sample:
     all:
+      scheduler: slurm
       queue: <your Slurm partition>
       account: <your Slurm account>
       walltime: 1-00:00:00 # 1 day
@@ -148,17 +160,6 @@ papermill_params:
       splink_engine: spark
       spark_local: False
 ```
-
-You will now need access to Slurm from inside the Singularity image for Spark.
-An example container for this purpose, which works on the IHME cluster, is included in
-this repository. To use this example, run
-
-```console
-$ singularity build --fakeroot spark_slurm_container/spark.sif spark_slurm_container/Singularity
-```
-
-and then add `custom_spark_container_path: spark_slurm_container/spark.sif` to the top
-level of your configuration YAML.
 
 ## Distributed Dask *and* Spark
 
@@ -170,7 +171,7 @@ papermill_params:
   small_sample:
     all:
       compute_engine: dask
-      compute_engine_scheduler: slurm
+      scheduler: slurm
       queue: <your Slurm partition>
       account: <your Slurm account>
       walltime: 1-00:00:00 # 1 day
