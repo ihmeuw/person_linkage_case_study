@@ -124,7 +124,7 @@ papermill_params:
 
 This is powered by [dask_jobqueue](https://jobqueue.dask.org/en/latest/), which supports a number of schedulers besides
 Slurm.
-You will likely also want to configure the resources requested; see [`config/defaults.yaml`](.config/defaults.yaml)
+You will likely also want to configure the resources requested; see [`config/defaults.yaml`](./config/defaults.yaml)
 for examples of this.
 
 You will now need access to your job scheduler from inside the Singularity image for Spark.
