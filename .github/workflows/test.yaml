@@ -12,6 +12,10 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        # Needed for activate-environment, see https://github.com/marketplace/actions/setup-miniconda#important
+        shell: bash -el {0}
     steps:
       - uses: actions/checkout@v3
       - uses: conda-incubator/setup-miniconda@v3
@@ -23,12 +27,10 @@ jobs:
           conda update -n person_linkage_case_study --file conda.lock.txt
       - name: Install pip dependencies from lock file
         run: |
-          conda activate person_linkage_case_study
           pip install -r pip.lock.txt
           pip install .
       - name: Run pipeline
         run: |
-          conda activate person_linkage_case_study
           snakemake --forceall
       - name: Send mail
         # Notify when cron job fails
