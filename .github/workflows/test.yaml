@@ -23,10 +23,12 @@ jobs:
           conda update -n person_linkage_case_study --file conda.lock.txt
       - name: Install pip dependencies from lock file
         run: |
+          conda activate person_linkage_case_study
           pip install -r pip.lock.txt
           pip install .
       - name: Run pipeline
         run: |
+          conda activate person_linkage_case_study
           snakemake --forceall
       - name: Send mail
         # Notify when cron job fails
