@@ -12,6 +12,10 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        # Needed for activate-environment, see https://github.com/marketplace/actions/setup-miniconda#important
+        shell: bash -el {0}
     steps:
       - uses: actions/checkout@v3
       - uses: conda-incubator/setup-miniconda@v3
